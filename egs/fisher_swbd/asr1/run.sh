@@ -3,6 +3,9 @@
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
+# to run:
+# ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/fisher_data --datadir data --epochs 25 --batchsize 48 --gpu 0 --stage 1
+
 . ./path.sh
 . ./cmd.sh
 
@@ -11,7 +14,7 @@ backend=pytorch
 stage=0        # start from 0 if you need to start from data preparation
 gpu=-1         # use 0 when using GPU on slurm/grid engine, otherwise -1
 debugmode=1
-dumpdir=dump   # directory to dump full features
+dumpdir=   # directory to dump full features
 N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
 verbose=0      # verbose option
 resume=        # Resume the training from snapshot
@@ -60,10 +63,10 @@ ctc_weight=0.3
 recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
 
 # data
-fisher_dir="/export/corpora3/LDC/LDC2004T19 /export/corpora3/LDC/LDC2005T19 /export/corpora3/LDC/LDC2004S13 /export/corpora3/LDC/LDC2005S13"
-swbd1_dir=/export/corpora3/LDC/LDC97S62
-eval2000_dir="/export/corpora2/LDC/LDC2002S09/hub5e_00 /export/corpora2/LDC/LDC2002T43"
-rt03_dir=/export/corpora/LDC/LDC2007S10
+fisher_dir="/data/ASR5/babel/ymiaoo/Install/LDC/LDC2004T19 /data/ASR5/babel/ymiaoo/Install/LDC/LDC2005T19 /data/ASR5/babel/ymiao/Install/LDC/LDC2004S13 /data/ASR5/babel/ymiao/Install/LDC/LDC2005S13"
+swbd1_dir="/data/MM1/corpora/LDC97S62"
+eval2000_dir="/data/MM1/corpora/LDC2002S09/hub5e_00 /data/MM1/corpora/LDC2002T43"
+rt03_dir=/data/MM1/corpora/LDC2007S10
 
 # exp tag
 tag="" # tag for managing experiments.
