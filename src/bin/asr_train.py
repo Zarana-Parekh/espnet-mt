@@ -123,6 +123,9 @@ def main():
                         help='Number of maximum epochs')
     parser.add_argument('--grad-clip', default=5, type=float,
                         help='Gradient norm threshold to clip')
+    # initialize with another model
+    parser.add_argument('--initchar', default='false',
+                        help='Path of the model to initialize with')
     args = parser.parse_args()
 
     # logging info
