@@ -4,7 +4,7 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
 # to run:
-# ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/fisher_data --datadir data --epochs 25 --batchsize 48 --gpu 0 --stage 1
+# ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/fisher_data --datadir data --gpu 0 --epochs 25 --target char --batchsize 48 --stage 1
 
 . ./path.sh
 . ./cmd.sh
@@ -19,6 +19,7 @@ datadir=       # directory pointing to data
 N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
 verbose=0      # verbose option
 resume=        # Resume the training from snapshot
+seed=1
 
 # feature configuration
 do_delta=false # true when using CNN
@@ -62,6 +63,11 @@ maxlenratio=0.0
 minlenratio=0.0
 ctc_weight=0.3
 recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
+
+# target unit related
+nbpe=500
+initchar=false
+
 
 # data
 fisher_dir="/data/ASR5/babel/ymiaoo/Install/LDC/LDC2004T19 /data/ASR5/babel/ymiaoo/Install/LDC/LDC2005T19 /data/ASR5/babel/ymiao/Install/LDC/LDC2004S13 /data/ASR5/babel/ymiao/Install/LDC/LDC2005S13"
@@ -123,6 +129,21 @@ if [ ${stage} -le 0 ]; then
     done
 fi
 
+# Different target units
+if [ "${target}" == "char" ]; then
+    bpe_model=false
+    word_model=false
+elif [ "${target}" == "bpe" ]; then
+    bpe_model=true
+    word_model=false
+elif [ "${target}" == "word" ]; then
+    bpe_model=false
+    word_model=true
+else
+    echo "Wrong target units, exiting."
+    exit 1;
+fi
+
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
 if [ ${stage} -le 1 ]; then
@@ -150,8 +171,11 @@ if [ ${stage} -le 1 ]; then
         data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
 fi
 
-dict=data/lang_1char/${train_set}_units.txt
+dict=data/lang_1char/${train_set}_${target}_units.txt
 nlsyms=data/lang_1char/non_lang_syms.txt
+if [ "${target}" == "bpe" ]; then
+    code=data/lang_1char/bpe_code${nbpe}.txt
+fi
 
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ]; then
@@ -165,19 +189,38 @@ if [ ${stage} -le 2 ]; then
 
     echo "make a dictionary"
     echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
-    text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-    | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+    if [ "${target}" == "char" ]; then
+        echo "Character model"
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
+        | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+    elif [ "${target}" == "bpe" ]; then
+        echo "BPE model"
+        echo "<space> 2" >> ${dict}
+        # learn bpe units
+        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s ${nbpe} > ${code}
+        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} \
+            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+    elif [ "${target}" == "word" ]; then
+        echo "Word model"
+        cut -f 2- -d" " data/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        | awk '{print $0 " " NR+1}' >> ${dict}
+    else
+        echo "Wrong target unit specified, exiting."
+        exit 1;
+    fi
     wc -l ${dict}
 
     echo "make json files"
     data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \
-         data/${train_set} ${dict} > ${feat_tr_dir}/data.json
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
+         data/${train_set} ${dict} > ${feat_tr_dir}/data_${target}.json
     data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
-         data/${train_dev} ${dict} > ${feat_dt_dir}/data.json
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
+         data/${train_dev} ${dict} > ${feat_dt_dir}/data_${target}.json
 fi
 
 if [ -z ${tag} ]; then
-    expdir=exp/${train_set}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
     if ${do_delta}; then
         expdir=${expdir}_delta
     fi
@@ -186,17 +229,37 @@ else
 fi
 mkdir -p ${expdir}
 
-lmexpdir=exp/train_rnnlm_2layer_bs256
+lmexpdir=exp/train_${target}_rnnlm_2layer_bs256
 mkdir -p ${lmexpdir}
 if [ ${stage} -le 3 ]; then
     (
     echo "stage 3: LM Preparation"
-    lmdatadir=data/local/lm_train
+    lmdatadir=data/local/lm_train_${target}
     mkdir -p ${lmdatadir}
-    text2token.py -s 1 -n 1 -l ${nlsyms} data/train_all_nodup/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-        > ${lmdatadir}/train.txt
-    text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-        > ${lmdatadir}/valid.txt
+    if [ "${target}" == "char" ]; then
+        echo "Character model"
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/train_all_nodup/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/train.txt
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/valid.txt
+    elif [ "${target}" == "bpe" ]; then
+        echo "BPE model"
+        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/train_trans.txt
+        cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
+        cut -f 2- -d" " data/${train_dev}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/valid.txt
+    elif [ "${target}" == "word" ]; then
+        echo "Word model"
+        cut -f 2- -d" " data/${train_set}/text | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/train_trans.txt
+        cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
+        cut -f 2- -d" " data/${train_dev}/text | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/valid.txt
+    else
+        echo "Wrong target unit specified, exiting"
+        exit 1;
+    fi
     ${cuda_cmd} ${lmexpdir}/train.log \
         lm_train.py \
         --gpu ${gpu} \
@@ -226,8 +289,8 @@ if [ ${stage} -le 4 ]; then
         --resume ${resume} \
         --train-feat scp:${feat_tr_dir}/feats.scp \
         --valid-feat scp:${feat_dt_dir}/feats.scp \
-        --train-label ${feat_tr_dir}/data.json \
-        --valid-label ${feat_dt_dir}/data.json \
+        --train-label ${feat_tr_dir}/data_${target}.json \
+        --valid-label ${feat_dt_dir}/data_{target}.json \
         --etype ${etype} \
         --elayers ${elayers} \
         --eunits ${eunits} \
@@ -268,7 +331,7 @@ if [ ${stage} -le 5 ]; then
         fi
 
         # make json labels for recognition
-        data2json.sh --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data.json
+        data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
 
         #### use CPU for decoding
         gpu=-1
@@ -278,7 +341,7 @@ if [ ${stage} -le 5 ]; then
             --gpu ${gpu} \
             --backend ${backend} \
             --recog-feat "$feats" \
-            --recog-label ${data}/data.json \
+            --recog-label ${data}/data_${target}.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/model.${recog_model}  \
             --model-conf ${expdir}/results/model.conf  \
@@ -291,7 +354,11 @@ if [ ${stage} -le 5 ]; then
             --lm-weight ${lm_weight} &
         wait
 
-        score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        if [ "$target" == "bpe" ]; then
+            score_sclite.sh --bpe true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        else
+            score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        fi
 
     ) &
     done
