@@ -67,6 +67,7 @@ recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.
 # target unit related
 nbpe=500
 initchar=false
+target=
 
 
 # data
