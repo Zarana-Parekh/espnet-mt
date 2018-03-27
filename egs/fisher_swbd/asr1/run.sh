@@ -69,9 +69,12 @@ nbpe=500
 initchar=false
 target=
 
+# dumping weights or attention
+dump_h=false
+dump_att=false
 
 # data
-fisher_dir="/data/ASR5/babel/ymiaoo/Install/LDC/LDC2004T19 /data/ASR5/babel/ymiaoo/Install/LDC/LDC2005T19 /data/ASR5/babel/ymiao/Install/LDC/LDC2004S13 /data/ASR5/babel/ymiao/Install/LDC/LDC2005S13"
+fisher_dir="/data/MM1/corpora/LDC2004T19 /data/MM1/corpora/LDC2005T19 /data/MM1/corpora/LDC2004S13 /data/MM1/corpora/LDC2005S13"
 swbd1_dir="/data/MM1/corpora/LDC97S62"
 eval2000_dir="/data/MM1/corpora/LDC2002S09/hub5e_00 /data/MM1/corpora/LDC2002T43"
 rt03_dir=/data/MM1/corpora/LDC2007S10
@@ -95,6 +98,9 @@ train_set=train_all_nodup
 train_dev="train_dev"
 recog_set=eval2000 # rt03"
 
+# This code is not consistent for this data
+# We only process eval2000 using this, but copy train_all_nodup from ramons folder
+# Do not use this stage=0
 if [ ${stage} -le 0 ]; then
     ### Task dependent. You have to make data the following preparation part by yourself.
     ### But you can utilize Kaldi recipes in most cases
@@ -352,7 +358,9 @@ if [ ${stage} -le 5 ]; then
             --minlenratio ${minlenratio} \
             --ctc-weight ${ctc_weight} \
             --rnnlm ${lmexpdir}/rnnlm.model.best \
-            --lm-weight ${lm_weight} &
+            --lm-weight ${lm_weight} \
+            --dump_h ${dump_h} \
+            --dump_attn ${dump_attn} &
         wait
 
         if [ "$target" == "bpe" ]; then

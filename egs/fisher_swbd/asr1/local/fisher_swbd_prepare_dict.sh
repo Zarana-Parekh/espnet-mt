@@ -27,9 +27,10 @@
 dir=data/local/dict_nosp
 mkdir -p $dir
 echo "Getting CMU dictionary"
-svn co  https://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict  $dir/cmudict
+#svn co  https://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict  $dir/cmudict
 
-# silence phones, one per line. 
+echo "Getting CMU dictionary, done"
+# silence phones, one per line.
 for w in sil laughter noise oov; do echo $w; done > $dir/silence_phones.txt
 echo sil > $dir/optional_silence.txt
 
@@ -63,16 +64,16 @@ cat $dir/lexicon2_raw.txt | \
      ($w) = @ARGV;  open(W, "<$w") || die "Error opening word-counts from $w";
      while(<W>) { # reading in words we saw in training data..
        ($c, $w) = split;
-       if (defined $pron{$w}) { 
+       if (defined $pron{$w}) {
          print "$w $pron{$w}\n";
        } else {
          @A = split("_", $w);
          if (@A > 1) {
            $this_pron = "";
            $pron_ok = 1;
-           foreach $a (@A) { 
+           foreach $a (@A) {
              if (defined($pron{$a})) { $this_pron = $this_pron . "$pron{$a} "; }
-             else { $pron_ok = 0; print STDERR "Not handling word $w, count is $c\n"; last; } 
+             else { $pron_ok = 0; print STDERR "Not handling word $w, count is $c\n"; last; }
            }
            if ($pron_ok) { $this_pron =~ s/\s+$//; $new_pron{$w} = $this_pron;  } }}}
     foreach $w (keys %new_pron) { print "$w $new_pron{$w}\n"; } ' \
