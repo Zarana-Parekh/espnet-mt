@@ -44,6 +44,10 @@ aconv_filts=100
 # hybrid CTC/attention
 mtlalpha=0.5
 
+# label smoothing
+lsm_type=unigram
+lsm_weight=0.05
+
 # minibatch related
 batchsize=60
 maxlen_in=800  # if input length  > maxlen_in, batchsize is automatically reduced
@@ -245,10 +249,8 @@ if [ ${stage} -le 3 ]; then
     mkdir -p ${lmdatadir}
     if [ "${target}" == "char" ]; then
         echo "Character model"
-        text2token.py -s 1 -n 1 -l ${nlsyms} data/train_all_nodup/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-            > ${lmdatadir}/train.txt
-        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-            > ${lmdatadir}/valid.txt
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/train_all_nodup/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/train.txt
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/valid.txt
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
         cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' \
@@ -297,7 +299,7 @@ if [ ${stage} -le 4 ]; then
         --train-feat scp:${feat_tr_dir}/feats.scp \
         --valid-feat scp:${feat_dt_dir}/feats.scp \
         --train-label ${feat_tr_dir}/data_${target}.json \
-        --valid-label ${feat_dt_dir}/data_{target}.json \
+        --valid-label ${feat_dt_dir}/data_${target}.json \
         --etype ${etype} \
         --elayers ${elayers} \
         --eunits ${eunits} \
