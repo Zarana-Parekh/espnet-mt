@@ -160,6 +160,25 @@ def train(args):
     e2e = E2E(idim, odim, args)
     model = Loss(e2e, args.mtlalpha)
 
+    # initialize model by weights of another model
+    if args.initchar != 'false':
+        logging.info('Initializing weight from model: ' + str(args.initchar))
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        state_dict = torch.load(args.initchar)
+        for k, v in state_dict.items():
+            # do not initialize 'predictor.ctc.ctc_lo.weight', 'predictor.ctc.ctc_lo.bias'
+            if 'ctc' in k:
+                continue
+            # do not initialize 'predictor.dec.embed.weight'
+            if 'dec.embed.weight' in k:
+                continue
+            # do not initialize 'predictor.dec.output.weight', 'predictor.dec.output.bias'
+            if 'predictor.dec.output' in k:
+                continue
+            new_state_dict[k] = v
+        model.load_state_dict(new_state_dict, strict=False)
+
     # write model config
     if not os.path.exists(args.outdir):
         os.makedirs(args.outdir)
