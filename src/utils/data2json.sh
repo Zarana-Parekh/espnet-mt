@@ -33,7 +33,7 @@ fi
 
 # output
 if ${bpe_model}; then
-    paste -d " " <(awk '{print $1}' ${dir}/text) <(cut -f 2- -d" " ${dir}/text | apply_bpe.py -c ${bpecode}) > ${tmpdir}/token.scp
+    paste -d " " <(awk '{print $1}' ${dir}/text) <(cut -f 2- -d" " ${dir}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${bpecode}) > ${tmpdir}/token.scp
 elif ${word_model}; then
     text2word_token.py -s 1 -l ${nlsyms} ${dir}/text > ${tmpdir}/token.scp
 elif [ ! -z ${nlsyms} ]; then
