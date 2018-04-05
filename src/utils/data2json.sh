@@ -25,8 +25,9 @@ fi
 
 dir=$1
 dic=$2
-tmpdir=`mktemp -d ${dir}/tmp-XXXXX`
-rm -f ${tmpdir}/*.scp
+#tmpdir=`mktemp -d ${dir}/tmp-XXXXX`
+tmpdir=`mktemp -d tmp-sp-XXXXX`
+#rm -f ${tmpdir}/*.scp
 
 # input, which is not necessary for decoding mode, and make it as an option
 if [ ! -z ${feat} ]; then
@@ -63,10 +64,10 @@ if ${vis_feat}; then
     python ../../../src/utils/pkl2json.py ${plc_feat_path} ${tmpdir} plc
 fi
 
-rm -f ${tmpdir}/*.json
+#rm -f ${tmpdir}/*.json
 for x in ${dir}/text ${dir}/utt2spk ${tmpdir}/*.scp; do
     k=`basename ${x} .scp`
     cat ${x} | scp2json.py --key ${k} > ${tmpdir}/${k}.json
 done
 mergejson.py ${tmpdir}/*.json
-rm -fr ${tmpdir}
+#rm -fr ${tmpdir}
