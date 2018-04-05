@@ -5,7 +5,7 @@
 # to run:
 : <<'END'
 initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
-./run.av.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --gpu 0 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat true --stage 2
+./run.av.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --gpu 0 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat true --adaptation 1 --stage 2
 END
 
 . ./path.sh
@@ -90,6 +90,7 @@ dump_attn=false
 vis_feat=false
 obj_feat_path=/data/ASR5/abhinav5/YTubeV2_480h/object_features.p
 plc_feat_path=/data/ASR5/abhinav5/PlacesAlexNet_480h/place_features.p
+adaptation=0
 
 # data
 # ---- put path to wav and transcripts here if needed
@@ -255,7 +256,7 @@ if [ ${stage} -le -999 ]; then
 fi
 
 if [ -z ${tag} ]; then
-    expdir=${expdir_main}/${train_set}_vis_context_vec_concat_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
+    expdir=${expdir_main}/${train_set}_adapt${adaptation}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -308,7 +309,8 @@ if [ ${stage} -le 4 ]; then
         --maxlen-out ${maxlen_out} \
         --opt ${opt} \
         --epochs ${epochs} \
-        --initchar ${initchar}
+        --initchar ${initchar} \
+        --adaptation ${adaptation}
 fi
 
 if [ ${stage} -le 5 ]; then
@@ -352,7 +354,8 @@ if [ ${stage} -le 5 ]; then
             --minlenratio ${minlenratio} \
             --ctc-weight ${ctc_weight} \
             --rnnlm ${lmexpdir}/rnnlm.model.best \
-            --lm-weight ${lm_weight} &
+            --lm-weight ${lm_weight} \
+            --adaptation ${adaptation} &
         wait
 
         if [ "${target}" == "bpe" ]; then

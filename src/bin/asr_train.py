@@ -126,6 +126,9 @@ def main():
     # initialize with another model
     parser.add_argument('--initchar', default='false',
                         help='Path of the model to initialize with')
+    # settings adaptation type
+    parser.add_argument('--adaptation', default=0, type=int,
+                        help='Specify type of attention to carry out')
     args = parser.parse_args()
 
     # logging info

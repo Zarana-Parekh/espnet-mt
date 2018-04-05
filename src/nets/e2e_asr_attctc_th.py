@@ -264,6 +264,9 @@ class E2E(torch.nn.Module):
         '''
         # utt list of frame x dim
         xs = [d[1]['feat'] for d in data]
+        logging.warn('xs size: ' + str(len(xs)) +' '+ str(xs[0].size()))
+        vis_os = [d[1]['obj_feat'].split() for d in data]
+        vis_ps = [d[1]['plc_feat'].split() for d in data]
         # remove 0-output-length utterances
         tids = [d[1]['tokenid'].split() for d in data]
         filtered_index = filter(lambda i: len(tids[i]) > 0, range(len(xs)))
@@ -272,6 +275,8 @@ class E2E(torch.nn.Module):
             logging.warning('Target sequences include empty tokenid (batch %d -> %d).' % (
                 len(xs), len(sorted_index)))
         xs = [xs[i] for i in sorted_index]
+        vis_os = [vis_os[i] for i in sorted_index]
+        vis_ps = [vis_ps[i] for i in sorted_index]
         # utt list of olen
         ys = [np.fromiter(map(int, tids[i]), dtype=np.int64)
               for i in sorted_index]
@@ -285,6 +290,12 @@ class E2E(torch.nn.Module):
         # 1. encoder
         xpad = pad_list(hs)
         hpad, hlens = self.enc(xpad, ilens)
+        logging.warn('hpad size: ' + hpad.size())
+
+        if args.adaptation == 1:
+            # concatinating vis feats to hidden vector
+            hpad = torch.cat((hpad,vis_os,vis_ps), dim=0)
+        logging.warn('adapted hpad size: '+hpad.size())
 
         # # 3. CTC loss
         loss_ctc = self.ctc(hpad, hlens, ys)
