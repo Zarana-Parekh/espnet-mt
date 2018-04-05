@@ -38,9 +38,9 @@ def main():
 
         a_flat = []
         for z in a:
-            if z in nls:
+            #if z in nls:
                 # skipping nlsyms
-                continue
+            #    continue
             a_flat.append("".join(z))
         print ' '.join(a_flat).encode('utf_8')
         line = f.readline()

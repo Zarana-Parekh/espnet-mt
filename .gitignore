@@ -16,6 +16,7 @@ egs/*/*/exp
 egs/*/*/fbank
 egs/*/*/stft
 egs/*/*/enhan
+egs/*/*/tmp*
 
 # tools related
 src/utils/kaldi_io_py.py

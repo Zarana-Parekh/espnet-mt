@@ -5,7 +5,7 @@
 # to run:
 : <<'END'
 initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
-./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/wsj_data --datadir data --gpu 0 --epochs 15 --batchsize 48 --lm_weight 0.3 --bplen 35 --stage 3 --target word --initchar $initpath
+./run.av.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --gpu 0 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat true --stage 2
 END
 
 . ./path.sh
@@ -86,12 +86,17 @@ bplen=35
 dump_h=false
 dump_attn=false
 
+# visual feat related
+vis_feat=false
+obj_feat_path=/data/ASR5/abhinav5/YTubeV2_480h/object_features.p
+plc_feat_path=/data/ASR5/abhinav5/PlacesAlexNet_480h/place_features.p
+
 # data
-wsj0=/data/ASR5/babel/ymiao/Install/LDC/LDC93S6B
-wsj1=/data/ASR5/babel/ymiao/Install/LDC/LDC94S13B
+# ---- put path to wav and transcripts here if needed
 
 # exp tag
 tag="" # tag for managing experiments.
+expdir_main=
 
 . utils/parse_options.sh || exit 1;
 
@@ -104,17 +109,9 @@ set -e
 set -u
 set -o pipefail
 
-train_set=train_si284
-train_dev=test_dev93
-recog_set="test_dev93 test_eval92"
-
-if [ ${stage} -le 0 ]; then
-    ### Task dependent. You have to make data the following preparation part by yourself.
-    ### But you can utilize Kaldi recipes in most cases
-    echo "stage 0: Data preparation"
-    local/wsj_data_prep.sh ${wsj0}/??-{?,??}.? ${wsj1}/??-{?,??}.?
-    local/wsj_format_data.sh
-fi
+train_set=train
+train_dev=dev_test
+recog_set="dev_test dev5_test held_out_test"
 
 # Different target units
 if [ "${target}" == "char" ]; then
@@ -140,32 +137,33 @@ if [ ${stage} -le 1 ]; then
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train_si284 test_dev93 test_eval92; do
-        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 10 data/${x} exp/make_fbank/${x} ${fbankdir}
+    for x in train dev_test dev5_test held_out_test; do
+        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 10 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
     done
 
     # compute global CMVN
-    compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
+    compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
 
     # dump features for training
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
-        data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
+        ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
-        data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
+        ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
 fi
 
-dict=data/lang_1char/${train_set}_${target}_units.txt
-nlsyms=data/lang_1char/non_lang_syms.txt
-code=data/lang_1char/bpe_code${nbpe}.txt
+dict=${datadir}/lang_1char/${train_set}_${target}_units.txt
+nlsyms=${datadir}/lang_1char/non_lang_syms.txt
+code=${datadir}/lang_1char/bpe_code${nbpe}.txt
 
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ]; then
     ### Task dependent. You have to check non-linguistic symbols used in the corpus.
     echo "stage 2: Dictionary and Json Data Preparation"
-    mkdir -p data/lang_1char/
+    mkdir -p ${datadir}/lang_1char/
 
-    echo "make a non-linguistic symbol list"
-    cut -f 2- data/${train_set}/text | tr " " "\n" | sort | uniq | grep "<" > ${nlsyms}
+    echo "make a non-linguistic symbol list, currently empty for How To"
+   # cut -f 2- ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq | grep "<" > ${nlsyms}
+   # echo " " > ${nlsyms}
     cat ${nlsyms}
 
     echo "make a dictionary"
@@ -173,18 +171,20 @@ if [ ${stage} -le 2 ]; then
 
     if [ "${target}" == "char" ]; then
         echo "Character model"
-        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
+        #text2token.py -s 1 -n 1 -l ${nlsyms} ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
+        #    | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+        text2token.py -s 1 -n 1 ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
             | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
         echo "<space> 2" >> ${dict}
         # learn bpe units
-        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
-        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
+        cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
+        cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
             | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
     elif [ "${target}" == "word" ]; then
         echo "Word model"
-        cut -f 2- -d" " data/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
             | awk '{print $0 " " NR+1}' >> ${dict}
     else
         echo "Wrong target units specified, exiting."
@@ -193,42 +193,46 @@ if [ ${stage} -le 2 ]; then
     wc -l ${dict}
 
     echo "make json files"
-    data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \
-        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
-         data/${train_set} ${dict} > ${feat_tr_dir}/data_${target}.json
-    data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
-        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
-         data/${train_dev} ${dict} > ${feat_dt_dir}/data_${target}.json
+    #data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \
+    data2json.sh --feat ${feat_tr_dir}/feats.scp \
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
+        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
+         ${datadir}/${train_set} ${dict} > ${feat_tr_dir}/data_vis_${target}.json
+    #data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
+    data2json.sh --feat ${feat_dt_dir}/feats.scp \
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
+        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
+         ${datadir}/${train_dev} ${dict} > ${feat_dt_dir}/data_vis_${target}.json
 fi
 
 # It takes a few days. If you just want to end-to-end ASR without LM,
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
-lmexpdir=exp/train_${target}_rnnlm_2layer_bs2048
+lmexpdir=${expdir_main}/train_${target}_rnnlm_2layer_bs2048
 mkdir -p ${lmexpdir}
-if [ ${stage} -le 3 ]; then
+if [ ${stage} -le -999 ]; then
     echo "stage 3: LM Preparation"
-    lmdatadir=data/local/lm_train_${target}
+    lmdatadir=${datadir}/local/lm_train_${target}
     mkdir -p ${lmdatadir}
     if [ "${target}" == "char" ]; then
         echo "Character model"
-    #    text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-    #    > ${lmdatadir}/train_trans.txt
-    #    zcat ${wsj1}/13-32.1/wsj1/doc/lng_modl/lm_train/np_data/{87,88,89}/*.z | grep -v "<" | tr [a-z] [A-Z] \
-    #    | text2token.py -n 1 | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' >> ${lmdatadir}/train_others.txt
-    #    cat ${lmdatadir}/train_trans.txt ${lmdatadir}/train_others.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
-    #    text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-    #    > ${lmdatadir}/valid.txt
+        #text2token.py -s 1 -n 1 -l ${nlsyms} ${datadir}/${train_set}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+        text2token.py -s 1 -n 1 ${datadir}/${train_set}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+        > ${lmdatadir}/train_trans.txt
+        cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
+        #text2token.py -s 1 -n 1 -l ${nlsyms} ${datadir}/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+        text2token.py -s 1 -n 1 ${datadir}/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
+        > ${lmdatadir}/valid.txt
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
-        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/train_trans.txt
+        cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/train_trans.txt
         cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
-        cut -f 2- -d" " data/${train_dev}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/valid.txt
+        cut -f 2- -d" " ${datadir}/${train_dev}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/valid.txt
     elif [ "${target}" == "word" ]; then
         echo "Word model"
-        cut -f 2- -d" " data/${train_set}/text | perl -pe 's/\n/ <eos> /g' \
+        cut -f 2- -d" " ${datadir}/${train_set}/text | perl -pe 's/\n/ <eos> /g' \
                          > ${lmdatadir}/train_trans.txt
         cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
-        cut -f 2- -d" " data/${train_dev}/text | perl -pe 's/\n/ <eos> /g' \
+        cut -f 2- -d" " ${datadir}/${train_dev}/text | perl -pe 's/\n/ <eos> /g' \
                          > ${lmdatadir}/valid.txt
     else
         echo "Wrong target units specified, exiting."
@@ -247,12 +251,11 @@ if [ ${stage} -le 3 ]; then
         --dict ${dict} \
         --bproplen ${bplen}
 
-    echo "LM training finished, exiting"
-    exit 1;
+    echo "LM training finished"
 fi
 
 if [ -z ${tag} ]; then
-    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=${expdir_main}/${train_set}_vis_context_vec_concat_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -260,7 +263,7 @@ if [ -z ${tag} ]; then
         expdir=${expdir}_delta
     fi
 else
-    expdir=exp/${train_set}_${tag}
+    expdir=${expdir_main}/${train_set}_${tag}
 fi
 mkdir -p ${expdir}
 
@@ -281,8 +284,8 @@ if [ ${stage} -le 4 ]; then
         --seed ${seed} \
         --train-feat scp:${feat_tr_dir}/feats.scp \
         --valid-feat scp:${feat_dt_dir}/feats.scp \
-        --train-label ${feat_tr_dir}/data_${target}.json \
-        --valid-label ${feat_dt_dir}/data_${target}.json \
+        --train-label ${feat_tr_dir}/data_vis_${target}.json \
+        --valid-label ${feat_dt_dir}/data_vis_${target}.json \
         --etype ${etype} \
         --elayers ${elayers} \
         --eunits ${eunits} \
@@ -317,18 +320,19 @@ if [ ${stage} -le 5 ]; then
         decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}_rnnlm${lm_weight}
 
         # split data
-        data=data/${rtask}
+        data=${datadir}/${rtask}
         split_data.sh --per-utt ${data} ${nj};
         sdata=${data}/split${nj}utt;
 
         # feature extraction
-        feats="ark,s,cs:apply-cmvn --norm-vars=true data/${train_set}/cmvn.ark scp:${sdata}/JOB/feats.scp ark:- |"
+        feats="ark,s,cs:apply-cmvn --norm-vars=true ${datadir}/${train_set}/cmvn.ark scp:${sdata}/JOB/feats.scp ark:- |"
         if ${do_delta}; then
         feats="$feats add-deltas ark:- ark:- |"
         fi
 
         # make json labels for recognition
-        data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
+        #data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
+        data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} ${data} ${dict} > ${data}/data_vis_${target}.json
 
         #### use CPU for decoding
         gpu=-1
@@ -338,7 +342,7 @@ if [ ${stage} -le 5 ]; then
             --gpu ${gpu} \
             --backend ${backend} \
             --recog-feat "$feats" \
-            --recog-label ${data}/data_${target}.json \
+            --recog-label ${data}/data_vis_${target}.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/model.${recog_model}  \
             --model-conf ${expdir}/results/model.conf  \
@@ -352,9 +356,11 @@ if [ ${stage} -le 5 ]; then
         wait
 
         if [ "${target}" == "bpe" ]; then
-            score_sclite.sh --bpe true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+            #score_sclite.sh --bpe true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+            score_sclite.sh --bpe true ${expdir}/${decode_dir} ${dict}
         else
-            score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+            #score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+            score_sclite.sh --wer true ${expdir}/${decode_dir} ${dict}
         fi
 
     ) &

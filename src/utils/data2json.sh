@@ -12,6 +12,9 @@ oov="<unk>"
 bpecode=""
 word_model=false
 bpe_model=false
+vis_feat=false
+obj_feat_path=""
+plc_feat_path=""
 
 . utils/parse_options.sh
 
@@ -35,7 +38,8 @@ fi
 if ${bpe_model}; then
     paste -d " " <(awk '{print $1}' ${dir}/text) <(cut -f 2- -d" " ${dir}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${bpecode}) > ${tmpdir}/token.scp
 elif ${word_model}; then
-    text2word_token.py -s 1 -l ${nlsyms} ${dir}/text > ${tmpdir}/token.scp
+    #text2word_token.py -s 1 -l ${nlsyms} ${dir}/text > ${tmpdir}/token.scp
+    text2word_token.py -s 1 ${dir}/text > ${tmpdir}/token.scp
 elif [ ! -z ${nlsyms} ]; then
     text2token.py -s 1 -n 1 -l ${nlsyms} ${dir}/text > ${tmpdir}/token.scp
 else
@@ -51,6 +55,12 @@ awk -v odim=${odim} '{print $1 " " odim}' ${dir}/text > ${tmpdir}/odim.scp
 # others
 if [ ! -z ${lang} ]; then
     awk -v lang=${lang} '{print $1 " " lang}' ${dir}/text > ${tmpdir}/lang.scp
+fi
+
+# for including visual feats in data.json
+if ${vis_feat}; then
+    python ../../../src/utils/pkl2json.py ${obj_feat_path} ${tmpdir} obj
+    python ../../../src/utils/pkl2json.py ${plc_feat_path} ${tmpdir} plc
 fi
 
 rm -f ${tmpdir}/*.json
