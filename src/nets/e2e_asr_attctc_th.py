@@ -151,6 +151,7 @@ class E2E(torch.nn.Module):
         self.verbose = args.verbose
         self.char_list = args.char_list
         self.outdir = args.outdir
+        self.adaptation = args.adaptation
 
         # below means the last number becomes eos/sos ID
         # note that sos/eos IDs are identical
@@ -264,9 +265,9 @@ class E2E(torch.nn.Module):
         '''
         # utt list of frame x dim
         xs = [d[1]['feat'] for d in data]
-        logging.warn('xs size: ' + str(len(xs)) +' '+ str(xs[0].size()))
-        vis_os = [d[1]['obj_feat'].split() for d in data]
-        vis_ps = [d[1]['plc_feat'].split() for d in data]
+        # vis feat list of 1 x 100 each
+        vis_os = [np.fromstring(d[1]['obj_feat'], dtype=np.float32, sep=' ') for d in data]
+        vis_ps = [np.fromstring(d[1]['plc_feat'], dtype=np.float32, sep=' ') for d in data]
         # remove 0-output-length utterances
         tids = [d[1]['tokenid'].split() for d in data]
         filtered_index = filter(lambda i: len(tids[i]) > 0, range(len(xs)))
@@ -274,6 +275,7 @@ class E2E(torch.nn.Module):
         if len(sorted_index) != len(xs):
             logging.warning('Target sequences include empty tokenid (batch %d -> %d).' % (
                 len(xs), len(sorted_index)))
+        # re-order based on sorted_index
         xs = [xs[i] for i in sorted_index]
         vis_os = [vis_os[i] for i in sorted_index]
         vis_ps = [vis_ps[i] for i in sorted_index]
@@ -285,23 +287,35 @@ class E2E(torch.nn.Module):
         # subsample frame
         xs = [xx[::self.subsample[0], :] for xx in xs]
         ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
+        # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
+        vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
+        vis_ps_var = [to_cuda(self, Variable(torch.from_numpy(v_p))) for v_p in vis_ps]
 
         # 1. encoder
         xpad = pad_list(hs)
         hpad, hlens = self.enc(xpad, ilens)
-        logging.warn('hpad size: ' + hpad.size())
 
-        if args.adaptation == 1:
-            # concatinating vis feats to hidden vector
-            hpad = torch.cat((hpad,vis_os,vis_ps), dim=0)
-        logging.warn('adapted hpad size: '+hpad.size())
+        if self.adaptation == 1:
+            # concatenating vis feats to hidden vector
+            #logging.warning('original hpad size: ' + str(hpad.size()))
+            # saving to temporary Variable
+            hpad_vis_dummy = to_cuda(self, Variable(torch.zeros(hpad.size(0), (hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0)), hpad.size(2)), requires_grad=True))
+            hpad_vis = hpad_vis_dummy.clone()
+            hlens_vis = [(hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0))]*hpad.size(0)
+            #logging.warning('init adapted hpad of size: '+str(hpad_vis.size()))
+            for b in range(len(xs)):
+                # append vis_os_var[b] 'dim' number of times
+                vis_os_var[b] = vis_os_var[b].unsqueeze(1).repeat(1, 1, hpad.size()[-1])
+                vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hpad.size()[-1])
+                hpad_vis[b] = torch.cat([hpad[b],vis_os_var[b][0],vis_ps_var[b][0]], dim=0)
+            #logging.warning('adapted hpad size: '+str(hpad_vis.size()))
 
         # # 3. CTC loss
-        loss_ctc = self.ctc(hpad, hlens, ys)
+        loss_ctc = self.ctc(hpad_vis, hlens_vis, ys)
 
         # 4. attention loss
-        loss_att, acc = self.dec(hpad, hlens, ys)
+        loss_att, acc = self.dec(hpad_vis, hlens_vis, ys)
 
         return loss_ctc, loss_att, acc
 
