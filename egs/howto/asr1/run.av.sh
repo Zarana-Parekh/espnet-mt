@@ -5,7 +5,8 @@
 # to run:
 : <<'END'
 initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
-./run.av.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --gpu 0 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat true --adaptation 1 --stage 2
+resumepath=exp/90h/train_adapt1_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_d1_unit300_location_mtlalpha0_adadelta_bs40_lsmunigram0.05/results/model.acc.best
+./run.av.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --gpu 0 --epochs 20 --batchsize 40 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --atype dot --target char --initchar false --vis_feat true --adaptation 1 --stage 4
 END
 
 . ./path.sh

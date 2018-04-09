@@ -292,16 +292,24 @@ class E2E(torch.nn.Module):
         vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
         vis_ps_var = [to_cuda(self, Variable(torch.from_numpy(v_p))) for v_p in vis_ps]
 
-        # 1. encoder
-        xpad = pad_list(hs)
-        hpad, hlens = self.enc(xpad, ilens)
-
-        if self.adaptation == 1:
+        if self.adaptation == 0:
+            # no adaptation
+            # 1. encoder
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
+            # # 3. CTC loss
+            loss_ctc = self.ctc(hpad, hlens, ys)
+            # 4. attention loss
+            loss_att, acc = self.dec(hpad, hlens, ys)
+        elif self.adaptation == 1:
             # concatenating vis feats to hidden vector
+            # 1. encoder
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
             #logging.warning('original hpad size: ' + str(hpad.size()))
-            # saving to temporary Variable
+            # saving to new Variable
             hpad_vis_dummy = to_cuda(self, Variable(torch.zeros(hpad.size(0), (hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0)), hpad.size(2)), requires_grad=True))
-            hpad_vis = hpad_vis_dummy.clone()
+            hpad_vis = hpad_vis_dummy.clone() # need to clone as cannot use leaf Variable for in place changes
             hlens_vis = [(hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0))]*hpad.size(0)
             #logging.warning('init adapted hpad of size: '+str(hpad_vis.size()))
             for b in range(len(xs)):
@@ -310,12 +318,45 @@ class E2E(torch.nn.Module):
                 vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hpad.size()[-1])
                 hpad_vis[b] = torch.cat([hpad[b],vis_os_var[b][0],vis_ps_var[b][0]], dim=0)
             #logging.warning('adapted hpad size: '+str(hpad_vis.size()))
+            # # 3. CTC loss
+            loss_ctc = self.ctc(hpad_vis, hlens_vis, ys)
+            # 4. attention loss
+            loss_att, acc = self.dec(hpad_vis, hlens_vis, ys)
+        elif self.adaptation == 2:
+            # concatenating vis feats to context vector
+            # 1. encoder
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
+            # # 3. CTC loss
+            loss_ctc = self.ctc(hpad, hlens, ys)
+            # 4. Attention loss
+            # pass vis features to decoder
+            # TODO: complete this
+            loss_att, acc = self.dec(hpad, hlens, ys)
+        elif self.adaptation == 3:
+            # input concatenation
+            # 1. encoder
+            logging.warning('unadapted hs : ' + str(hs[0].size()))
+            hs_vis = [to_cuda(self, Variable(torch.zeros(hs[b].size(0), (hs[b].size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0))), requires_grad=True)) for b in range(len(hs))]
+            # append vis feats to input xs
+            for b in range(len(hs)):
+                # append vis_os_var[b] 'frame_num' number of times
+                vis_os_var[b] = vis_os_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
+                vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
+                hs_vis[b] = torch.cat([hs[b],vis_os_var[b],vis_ps_var[b]], dim=1)
+            logging.warning('adapted hs_vis : ' + str(hs_vis[0].size()))
+            xpad = pad_list(hs_vis)
+            logging.warning('adapted xpad : ' + str(xpad.size()))
 
-        # # 3. CTC loss
-        loss_ctc = self.ctc(hpad_vis, hlens_vis, ys)
+            # pass adapted input to encoder
+            hpad, hlens = self.enc(xpad, ilens)
+            # # 3. CTC loss
+            loss_ctc = self.ctc(hpad, hlens, ys)
+            # 4. attention loss
+            loss_att, acc = self.dec(hpad, hlens, ys)
+        else:
+            logging.warning('Only implemented adaptation 0,1,2,3 so far')
 
-        # 4. attention loss
-        loss_att, acc = self.dec(hpad_vis, hlens_vis, ys)
 
         return loss_ctc, loss_att, acc
 

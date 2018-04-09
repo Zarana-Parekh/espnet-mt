@@ -128,6 +128,7 @@ def main():
                         help='Path of the model to initialize with')
     # settings adaptation type
     parser.add_argument('--adaptation', default=0, type=int,
+                        choices=[0,1,2,3],
                         help='Specify type of attention to carry out')
     args = parser.parse_args()
 
