@@ -20,6 +20,7 @@ egs/*/*/tmp*
 
 # tools related
 src/utils/kaldi_io_py.py
+tools/*
 tools/kaldi
 tools/kaldi-io-for-python/
 tools/kaldi_github/
