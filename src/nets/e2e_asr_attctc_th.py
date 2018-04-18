@@ -178,6 +178,9 @@ class E2E(torch.nn.Module):
         else:
             labeldist = None
 
+        if args.adaptation == 3:
+            idim = idim + 200
+
         # encoder
         self.enc = Encoder(args.etype, idim, args.elayers, args.eunits, args.eprojs,
                            self.subsample, args.dropout_rate)
@@ -265,9 +268,10 @@ class E2E(torch.nn.Module):
         '''
         # utt list of frame x dim
         xs = [d[1]['feat'] for d in data]
-        # vis feat list of 1 x 100 each
-        vis_os = [np.fromstring(d[1]['obj_feat'], dtype=np.float32, sep=' ') for d in data]
-        vis_ps = [np.fromstring(d[1]['plc_feat'], dtype=np.float32, sep=' ') for d in data]
+        if self.adaptation != 0:
+            # vis feat list of 1 x 100 each
+            vis_os = [np.fromstring(d[1]['obj_feat'], dtype=np.float32, sep=' ') for d in data]
+            vis_ps = [np.fromstring(d[1]['plc_feat'], dtype=np.float32, sep=' ') for d in data]
         # remove 0-output-length utterances
         tids = [d[1]['tokenid'].split() for d in data]
         filtered_index = filter(lambda i: len(tids[i]) > 0, range(len(xs)))
@@ -277,8 +281,9 @@ class E2E(torch.nn.Module):
                 len(xs), len(sorted_index)))
         # re-order based on sorted_index
         xs = [xs[i] for i in sorted_index]
-        vis_os = [vis_os[i] for i in sorted_index]
-        vis_ps = [vis_ps[i] for i in sorted_index]
+        if self.adaptation != 0:
+            vis_os = [vis_os[i] for i in sorted_index]
+            vis_ps = [vis_ps[i] for i in sorted_index]
         # utt list of olen
         ys = [np.fromiter(map(int, tids[i]), dtype=np.int64)
               for i in sorted_index]
@@ -289,8 +294,9 @@ class E2E(torch.nn.Module):
         ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
         # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
-        vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
-        vis_ps_var = [to_cuda(self, Variable(torch.from_numpy(v_p))) for v_p in vis_ps]
+        if self.adaptation != 0:
+            vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
+            vis_ps_var = [to_cuda(self, Variable(torch.from_numpy(v_p))) for v_p in vis_ps]
 
         if self.adaptation == 0:
             # no adaptation
@@ -330,13 +336,16 @@ class E2E(torch.nn.Module):
             # # 3. CTC loss
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. Attention loss
-            # pass vis features to decoder
+            # pass vis features to decoder, concatenating obj and plc features
+            #vis_all_var =
+            #vis_all_var = torch.cat(vis_os_var, vis_ps_var)
+            #logging.warning('concatenated vis feat dim : ' + vis_all_var[0].size())
             # TODO: complete this
             loss_att, acc = self.dec(hpad, hlens, ys)
         elif self.adaptation == 3:
             # input concatenation
             # 1. encoder
-            logging.warning('unadapted hs : ' + str(hs[0].size()))
+            #logging.warning('unadapted hs : ' + str(hs[0].size()))
             hs_vis = [to_cuda(self, Variable(torch.zeros(hs[b].size(0), (hs[b].size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0))), requires_grad=True)) for b in range(len(hs))]
             # append vis feats to input xs
             for b in range(len(hs)):
@@ -344,11 +353,11 @@ class E2E(torch.nn.Module):
                 vis_os_var[b] = vis_os_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
                 vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
                 hs_vis[b] = torch.cat([hs[b],vis_os_var[b],vis_ps_var[b]], dim=1)
-            logging.warning('adapted hs_vis : ' + str(hs_vis[0].size()))
+            #logging.warning('adapted hs_vis : ' + str(hs_vis[0].size()))
             xpad = pad_list(hs_vis)
-            logging.warning('adapted xpad : ' + str(xpad.size()))
 
             # pass adapted input to encoder
+            # the Encoder.idim needs to be modified in this case
             hpad, hlens = self.enc(xpad, ilens)
             # # 3. CTC loss
             loss_ctc = self.ctc(hpad, hlens, ys)
