@@ -20,4 +20,3 @@ export OMP_NUM_THREADS=1
 if [[ $(hostname -f) == *.clsp.jhu.edu ]] ; then
     export CUDA_VISIBLE_DEVICES=$(/usr/local/bin/free-gpu)
 fi
-

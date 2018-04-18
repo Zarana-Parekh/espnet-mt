@@ -14,7 +14,8 @@ END
 # general configuration
 backend=chainer
 stage=0        # start from 0 if you need to start from data preparation
-gpu=-1         # use 0 when using GPU on slurm/grid engine, otherwise -1
+gpu=            # will be deprecated, please use ngpu
+ngpu=0          # number of gpus ("0" uses cpu, otherwise use gpu)
 debugmode=1
 dumpdir=dump   # directory to dump full features
 datadir=       # directory pointing to data
@@ -98,6 +99,22 @@ tag="" # tag for managing experiments.
 
 . ./path.sh
 . ./cmd.sh
+
+# check gpu option usage
+if [ ! -z $gpu ]; then
+    echo "WARNING: --gpu option will be deprecated."
+    echo "WARNING: please use --ngpu option."
+    if [ $gpu -eq -1 ]; then
+        ngpu=0
+    else
+        ngpu=1
+    fi
+fi
+
+# only for CLSP
+if [[ $(hostname -f) == *.clsp.jhu.edu ]] ; then
+    export CUDA_VISIBLE_DEVICES=$(/usr/local/bin/free-gpu -n $ngpu)
+fi
 
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
@@ -293,9 +310,9 @@ mkdir -p ${expdir}
 if [ ${stage} -le 4 ]; then
     echo "stage 4: Network Training"
 
-    ${cuda_cmd} ${expdir}/train.log \
+    ${cuda_cmd} --gpu ${ngpu} ${expdir}/train.log \
         asr_train.py \
-        --gpu ${gpu} \
+        --ngpu ${ngpu} \
         --backend ${backend} \
         --outdir ${expdir}/results \
         --debugmode ${debugmode} \
@@ -357,11 +374,11 @@ if [ ${stage} -le 5 ]; then
         data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
 
         #### use CPU for decoding
-        gpu=-1
+        ngpu=0
 
         ${decode_cmd} JOB=1:${nj} ${expdir}/${decode_dir}/log/decode.JOB.log \
             asr_recog.py \
-            --gpu ${gpu} \
+            --ngpu ${ngpu} \
             --backend ${backend} \
             --recog-feat "$feats" \
             --recog-label ${data}/data_${target}.json \
