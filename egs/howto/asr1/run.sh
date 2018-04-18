@@ -5,7 +5,7 @@
 # to run:
 : <<'END'
 initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
-./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --gpu 0 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target bpe --initchar false --vis_feat false --stage 2
+./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --gpu 0 --epochs 20 --batchsize 40 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat false --stage 2
 END
 
 . ./path.sh
@@ -77,7 +77,7 @@ ctc_weight=0.3
 recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
 
 # target unit related
-nbpe=500
+nbpe=300
 initchar=
 target=
 bplen=35
@@ -141,6 +141,10 @@ if [ ${stage} -le 1 ]; then
         steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 10 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
     done
 
+    # remove utt having more than 3000 frames or less than 10 frames or
+    # remove utt having more than 400 characters or no more than 0       characters
+    remove_longshortdata.sh --maxframes 3000 --maxchars 400 data/480h/   train_all data/${train_set}
+
     # compute global CMVN
     compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
 
@@ -164,7 +168,7 @@ if [ ${stage} -le 2 ]; then
     echo "make a non-linguistic symbol list, currently empty for How To"
    # cut -f 2- ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq | grep "<" > ${nlsyms}
    # echo " " > ${nlsyms}
-    cat ${nlsyms}
+#    cat ${nlsyms}
 
     echo "make a dictionary"
     echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
