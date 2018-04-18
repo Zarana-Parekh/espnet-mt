@@ -338,6 +338,9 @@ def recog(args):
     else:
         rnnlm = None
 
+    if args.adaptation == 3:
+        idim = idim + 200
+
     # prepare Kaldi reader
     reader = kaldi_io_py.read_mat_ark(args.recog_feat)
 

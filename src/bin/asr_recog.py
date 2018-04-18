@@ -59,10 +59,16 @@ def main():
                         help='RNNLM model file to read')
     parser.add_argument('--lm-weight', default=0.1, type=float,
                         help='RNNLM weight.')
+
+    # dump attention and hidden vectors
     parser.add_argument('--dump_h', default='false', type=str,
                         help='True if dumping hidden vectors h')
     parser.add_argument('--dump_attn', default='false', type=str,
                         help='True if dumping attention vectors')
+
+    # for adaptation
+    parser.add_argument('--adaptation', default=0, type=int,
+                        help='Type of adaptation to perform')
     args = parser.parse_args()
 
     # logging info
