@@ -360,6 +360,9 @@ def recog(args):
             # get 1best and remove sos
             y_hat = nbest_hyps[0]['yseq'][1:]
 
+        if name not in recog_json.keys():
+            logging.warning('Skipping utt '+name+' as vis feat missing')
+            continue
         y_true = map(int, recog_json[name]['tokenid'].split())
 
         # print out decoding result

@@ -4,8 +4,10 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 # to run:
 : <<'END'
-initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
-./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --gpu 0 --epochs 20 --batchsize 40 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat false --stage 2
+initpath=exp/90h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs44_mli800_mlo150_lsmunigram0.05/results/model.acc.best
+./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 2 --epochs 20 --batchsize 38 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat false --stage 4
+
+./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --ngpu 1 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target bpe --nbpe 300 --initchar $initpath --vis_feat false --stage 4
 END
 
 . ./path.sh
@@ -14,7 +16,8 @@ END
 # general configuration
 backend=chainer
 stage=0        # start from 0 if you need to start from data preparation
-gpu=-1         # use 0 when using GPU on slurm/grid engine, otherwise -1
+gpu=           # will be deprecated, please use ngpu
+ngpu=0         # number of gpus ("0" uses cpu, otherwise use gpu)
 debugmode=1
 dumpdir=dump   # directory to dump full features
 datadir=       # directory pointing to data
@@ -79,7 +82,7 @@ recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.
 # target unit related
 nbpe=300
 initchar=
-target=
+target=char
 bplen=35
 
 # dumping encoder hidden vector weights or attention weights
@@ -88,6 +91,7 @@ dump_attn=false
 
 # visual feat related
 vis_feat=false
+adaptation=0
 obj_feat_path=/data/ASR5/abhinav5/YTubeV2_480h/object_features.p
 plc_feat_path=/data/ASR5/abhinav5/PlacesAlexNet_480h/place_features.p
 
@@ -103,6 +107,22 @@ expdir_main=
 . ./path.sh
 . ./cmd.sh
 
+# check gpu option usage
+if [ ! -z $gpu ]; then
+    echo "WARNING: --gpu option will be deprecated."
+    echo "WARNING: please use --ngpu option."
+    if [ $gpu -eq -1 ]; then
+        ngpu=0
+    else
+        ngpu=1
+    fi
+fi
+
+# only for CLSP
+if [[ $(hostname -f) == *.clsp.jhu.edu ]] ; then
+    export CUDA_VISIBLE_DEVICES=$(/usr/local/bin/free-gpu -n $ngpu)
+fi
+
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
@@ -111,9 +131,10 @@ set -o pipefail
 
 train_set=train
 train_dev=dev_test
-recog_set="dev_test dev5_test held_out_test"
+recog_set="dev_test dev5_test"
 
 # Different target units
+echo $target
 if [ "${target}" == "char" ]; then
     bpe_model=false
     word_model=false
@@ -134,16 +155,14 @@ feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
+
     echo "stage 1: Feature Generation"
+
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train dev_test dev5_test held_out_test; do
-        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 10 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
+    for x in train dev_test dev5_test; do # held_out_test; do
+        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
     done
-
-    # remove utt having more than 3000 frames or less than 10 frames or
-    # remove utt having more than 400 characters or no more than 0       characters
-    remove_longshortdata.sh --maxframes 3000 --maxchars 400 data/480h/   train_all data/${train_set}
 
     # compute global CMVN
     compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
@@ -190,6 +209,7 @@ if [ ${stage} -le 2 ]; then
         echo "Word model"
         cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
             | awk '{print $0 " " NR+1}' >> ${dict}
+        ../../../src/utils/clear_word_dict.py ${dict}
     else
         echo "Wrong target units specified, exiting."
         exit 1;
@@ -213,7 +233,7 @@ fi
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
 lmexpdir=${expdir_main}/train_${target}_rnnlm_2layer_bs2048
 mkdir -p ${lmexpdir}
-if [ ${stage} -le 3 ]; then
+if [ ${stage} -le -999 ]; then
     echo "stage 3: LM Preparation"
     lmdatadir=${datadir}/local/lm_train_${target}
     mkdir -p ${lmdatadir}
@@ -242,9 +262,16 @@ if [ ${stage} -le 3 ]; then
         echo "Wrong target units specified, exiting."
         exit 1;
     fi
+    # use only 1 gpu
+    if [ ${ngpu} -gt 1 ]; then
+        echo "LM training does not support multi-gpu. signle gpu will be used."
+        lmngpu=1
+    else
+        lmngpu=0
+    fi
     ${cuda_cmd} ${lmexpdir}/train.log \
         lm_train.py \
-        --gpu ${gpu} \
+        --ngpu ${lmngpu} \
         --backend ${backend} \
         --verbose 1 \
         --outdir ${lmexpdir} \
@@ -258,8 +285,14 @@ if [ ${stage} -le 3 ]; then
     echo "LM training finished"
 fi
 
+if [ "${target}" == "bpe" ]; then
+    targetname=${target}${nbpe}
+else
+    targetname=${target}
+fi
+
 if [ -z ${tag} ]; then
-    expdir=${expdir_main}/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=${expdir_main}/${train_set}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -274,9 +307,9 @@ mkdir -p ${expdir}
 if [ ${stage} -le 4 ]; then
     echo "stage 4: Network Training"
 
-    ${cuda_cmd} ${expdir}/train.log \
+    ${cuda_cmd} --gpu ${ngpu} ${expdir}/train.log \
         asr_train.py \
-        --gpu ${gpu} \
+        --ngpu ${ngpu} \
         --backend ${backend} \
         --outdir ${expdir}/results \
         --debugmode ${debugmode} \
@@ -321,7 +354,7 @@ if [ ${stage} -le 5 ]; then
 
     for rtask in ${recog_set}; do
     (
-        decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}_rnnlm${lm_weight}
+        decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
 
         # split data
         data=${datadir}/${rtask}
@@ -339,11 +372,11 @@ if [ ${stage} -le 5 ]; then
         data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} ${data} ${dict} > ${data}/data_${target}.json
 
         #### use CPU for decoding
-        gpu=-1
+        ngpu=0
 
         ${decode_cmd} JOB=1:${nj} ${expdir}/${decode_dir}/log/decode.JOB.log \
             asr_recog.py \
-            --gpu ${gpu} \
+            --ngpu ${ngpu} \
             --backend ${backend} \
             --recog-feat "$feats" \
             --recog-label ${data}/data_${target}.json \
@@ -355,8 +388,9 @@ if [ ${stage} -le 5 ]; then
             --maxlenratio ${maxlenratio} \
             --minlenratio ${minlenratio} \
             --ctc-weight ${ctc_weight} \
-            --rnnlm ${lmexpdir}/rnnlm.model.best \
-            --lm-weight ${lm_weight} &
+            --adaptation ${adaptation} &
+#            --rnnlm ${lmexpdir}/rnnlm.model.best \
+#            --lm-weight ${lm_weight} &
         wait
 
         if [ "${target}" == "bpe" ]; then
