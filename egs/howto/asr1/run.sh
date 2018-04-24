@@ -172,6 +172,10 @@ if [ ${stage} -le 1 ]; then
         ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
         ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+
+    echo "cleaning transcripts"
+    ../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
+    ../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
 fi
 
 dict=${datadir}/lang_1char/${train_set}_${target}_units.txt
@@ -184,32 +188,27 @@ if [ ${stage} -le 2 ]; then
     echo "stage 2: Dictionary and Json Data Preparation"
     mkdir -p ${datadir}/lang_1char/
 
-    echo "make a non-linguistic symbol list, currently empty for How To"
-   # cut -f 2- ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq | grep "<" > ${nlsyms}
-   # echo " " > ${nlsyms}
-#    cat ${nlsyms}
-
     echo "make a dictionary"
-    echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
 
     if [ "${target}" == "char" ]; then
         echo "Character model"
-        #text2token.py -s 1 -n 1 -l ${nlsyms} ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-        #    | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+        echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
+        # keeping only those units that occur more than 50 times
         text2token.py -s 1 -n 1 ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-            | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+            | sort | uniq -c | awk '$1>=50{print $2}' | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
+        echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
         echo "<space> 2" >> ${dict}
-        # learn bpe units
+        # learn bpe units, keeping only those units that occur more than 50 times
         cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
         cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
-            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+            | tr ' ' '\n' | sort | uniq -c | awk '$1>=50{print $2}' | awk '{print $0 " " NR+2}' >> ${dict}
     elif [ "${target}" == "word" ]; then
         echo "Word model"
-        cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
-            | awk '{print $0 " " NR+1}' >> ${dict}
-        ../../../src/utils/clear_word_dict.py ${dict}
+        #cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        #    | awk '{print $0 " " NR+1}' >> ${dict}
+        ../../../src/utils/make_word_dict.py ${datadir}/${train_set}/text ${dict}
     else
         echo "Wrong target units specified, exiting."
         exit 1;
@@ -355,6 +354,10 @@ if [ ${stage} -le 5 ]; then
     for rtask in ${recog_set}; do
     (
         decode_dir=decode_${rtask}_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
+
+        # cleaning transcripts (convert to lower case, handle [...] tokens
+
+        ../../../src/utils/clean_transcripts.py ${datadir}/rtask/text
 
         # split data
         data=${datadir}/${rtask}

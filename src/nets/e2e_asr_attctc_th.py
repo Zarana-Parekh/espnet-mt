@@ -292,7 +292,6 @@ class E2E(torch.nn.Module):
         # subsample frame
         xs = [xx[::self.subsample[0], :] for xx in xs]
         ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
-        logging.warning(ilens.shape)
         # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
         if self.adaptation != 0:
