@@ -15,6 +15,7 @@ bpe_model=false
 vis_feat=false
 obj_feat_path=""
 plc_feat_path=""
+topic_feat_path=""
 
 . utils/parse_options.sh
 
@@ -60,8 +61,9 @@ fi
 
 # for including visual feats in data.json
 if ${vis_feat}; then
-    python ../../../src/utils/pkl2json.py ${obj_feat_path} ${tmpdir} obj
-    python ../../../src/utils/pkl2json.py ${plc_feat_path} ${tmpdir} plc
+ #   python ../../../src/utils/pkl2json.py ${obj_feat_path} ${tmpdir} obj
+ #   python ../../../src/utils/pkl2json.py ${plc_feat_path} ${tmpdir} plc
+    python ../../../src/utils/pkl2json.py ${topic_feat_path} ${tmpdir} topic
 fi
 
 #rm -f ${tmpdir}/*.json

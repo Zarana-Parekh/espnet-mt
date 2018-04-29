@@ -92,8 +92,9 @@ dump_attn=false
 
 # visual feat related
 vis_feat=false
-obj_feat_path=/data/ASR5/abhinav5/YTubeV2_480h/object_features.p
-plc_feat_path=/data/ASR5/abhinav5/PlacesAlexNet_480h/place_features.p
+obj_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/object_features.p
+plc_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/place_features.p
+topic_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/topic_features.p
 adaptation=0
 
 # data
@@ -132,7 +133,7 @@ set -o pipefail
 
 train_set=train
 train_dev=dev_test
-recog_set="dev_test dev5_test" # held_out_test"
+recog_set="dev_test held_out_test"
 
 # Different target units
 if [ "${target}" == "char" ]; then
@@ -170,6 +171,12 @@ if [ ${stage} -le 1 ]; then
         ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
         ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+
+    echo "cleaning transcripts"
+     ../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
+     ../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
+     ../../../src/utils/clean_transcripts.py ${datadir}/held_out_test/text
+
 fi
 
 dict=${datadir}/lang_1char/${train_set}_${target}_units.txt
@@ -188,25 +195,27 @@ if [ ${stage} -le 2 ]; then
    # cat ${nlsyms}
 
     echo "make a dictionary"
-    echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
 
     if [ "${target}" == "char" ]; then
         echo "Character model"
-        #text2token.py -s 1 -n 1 -l ${nlsyms} ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-        #    | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+        echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
+
+        # keeping only those units that occur more than 50 times
         text2token.py -s 1 -n 1 ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-            | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+            | sort | uniq -c | awk '$1>=50{print $2}' | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
+        echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
         echo "<space> 2" >> ${dict}
-        # learn bpe units
+        # learn bpe units, keeping only those that occur more than 50 times
         cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
         cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
-            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+            | tr ' ' '\n' | sort | uniq -c | awk '$1>=50{print $2}' | awk '{print $0 " " NR+2}' >> ${dict}
     elif [ "${target}" == "word" ]; then
         echo "Word model"
-        cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
-            | awk '{print $0 " " NR+1}' >> ${dict}
+        #cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        #    | awk '{print $0 " " NR+1}' >> ${dict}
+        ../../../src/utils/make_word_dict.py ${datadir}/${train_set}/text ${dict}
     else
         echo "Wrong target units specified, exiting."
         exit 1;
@@ -217,12 +226,12 @@ if [ ${stage} -le 2 ]; then
     #data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \
     data2json.sh --feat ${feat_tr_dir}/feats.scp \
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
-        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
+        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} --topic_feat_path ${topic_feat_path}\
          ${datadir}/${train_set} ${dict} > ${feat_tr_dir}/data_vis_${target}.json
     #data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
     data2json.sh --feat ${feat_dt_dir}/feats.scp \
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
-        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
+        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} --topic_feat_path ${topic_feat_path}\
          ${datadir}/${train_dev} ${dict} > ${feat_dt_dir}/data_vis_${target}.json
 fi
 
@@ -269,7 +278,7 @@ if [ ${stage} -le -999 ]; then
     fi
     ${cuda_cmd} ${lmexpdir}/train.log \
         lm_train.py \
-        --gpu ${lmngpu} \
+        --ngpu ${lmngpu} \
         --backend ${backend} \
         --verbose 1 \
         --outdir ${lmexpdir} \

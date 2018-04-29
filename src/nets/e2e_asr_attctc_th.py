@@ -152,6 +152,7 @@ class E2E(torch.nn.Module):
         self.char_list = args.char_list
         self.outdir = args.outdir
         self.adaptation = args.adaptation
+        self.dump_h = False
 
         # below means the last number becomes eos/sos ID
         # note that sos/eos IDs are identical
@@ -228,7 +229,7 @@ class E2E(torch.nn.Module):
         # decoder
         self.dec = Decoder(args.eprojs, odim, args.dlayers, args.dunits,
                            self.sos, self.eos, self.att, self.verbose, self.char_list,
-                           labeldist, args.lsm_weight)
+                           labeldist, args.lsm_weight, args.adaptation)
 
         # weight initialization
         self.init_like_chainer()
@@ -268,7 +269,10 @@ class E2E(torch.nn.Module):
         '''
         # utt list of frame x dim
         xs = [d[1]['feat'] for d in data]
-        if self.adaptation != 0:
+        if self.adaptation in [6,7,8]:
+            # vis feat list of 1 x 100 each
+            vis_topic = [np.fromstring(d[1]['topic_feat'], dtype=np.float32, sep=' ') for d in data]
+        elif self.adaptation != 0:
             # vis feat list of 1 x 100 each
             vis_os = [np.fromstring(d[1]['obj_feat'], dtype=np.float32, sep=' ') for d in data]
             vis_ps = [np.fromstring(d[1]['plc_feat'], dtype=np.float32, sep=' ') for d in data]
@@ -281,7 +285,11 @@ class E2E(torch.nn.Module):
                 len(xs), len(sorted_index)))
         # re-order based on sorted_index
         xs = [xs[i] for i in sorted_index]
-        if self.adaptation != 0:
+
+        if self.adaptation in [6,7,8]:
+            # sort vis_topic vector
+            vis_topic = [vis_topic[i] for i in sorted_index]
+        elif self.adaptation != 0:
             vis_os = [vis_os[i] for i in sorted_index]
             vis_ps = [vis_ps[i] for i in sorted_index]
         # utt list of olen
@@ -294,7 +302,10 @@ class E2E(torch.nn.Module):
         ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
         # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
-        if self.adaptation != 0:
+
+        if self.adaptation in [6,7,8]:
+            vis_topic_var = [to_cuda(self, Variable(torch.from_numpy(v_t))) for v_t in vis_topic]
+        elif self.adaptation != 0:
             vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
             vis_ps_var = [to_cuda(self, Variable(torch.from_numpy(v_p))) for v_p in vis_ps]
 
@@ -312,6 +323,7 @@ class E2E(torch.nn.Module):
             # 1. encoder
             xpad = pad_list(hs)
             hpad, hlens = self.enc(xpad, ilens)
+            #B*T*320
             #logging.warning('original hpad size: ' + str(hpad.size()))
             # saving to new Variable
             hpad_vis_dummy = to_cuda(self, Variable(torch.zeros(hpad.size(0), (hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0)), hpad.size(2)), requires_grad=True))
@@ -328,8 +340,8 @@ class E2E(torch.nn.Module):
             loss_ctc = self.ctc(hpad_vis, hlens_vis, ys)
             # 4. attention loss
             loss_att, acc = self.dec(hpad_vis, hlens_vis, ys)
-        elif self.adaptation == 2:
-            # concatenating vis feats to context vector
+        elif self.adaptation in [4,5]:
+            # concatenating vis feats to context vector and embed of previous input
             # 1. encoder
             xpad = pad_list(hs)
             hpad, hlens = self.enc(xpad, ilens)
@@ -337,11 +349,12 @@ class E2E(torch.nn.Module):
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. Attention loss
             # pass vis features to decoder, concatenating obj and plc features
-            #vis_all_var =
-            #vis_all_var = torch.cat(vis_os_var, vis_ps_var)
-            #logging.warning('concatenated vis feat dim : ' + vis_all_var[0].size())
-            # TODO: complete this
-            loss_att, acc = self.dec(hpad, hlens, ys)
+            vis_os_var = torch.stack(vis_os_var,dim=0)
+            vis_ps_var = torch.stack(vis_ps_var,dim=0)
+            vis_all_var = torch.cat([vis_os_var, vis_ps_var], dim=1)
+            #Visallvar -> 1x200
+            #hpad ->BxTx320
+            loss_att, acc = self.dec(hpad, hlens, ys, vis_all_var)
         elif self.adaptation == 3:
             # input concatenation
             # 1. encoder
@@ -363,8 +376,19 @@ class E2E(torch.nn.Module):
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. attention loss
             loss_att, acc = self.dec(hpad, hlens, ys)
+        elif self.adaptation in [6,7,8]:
+            # append topic information in the decoder: to context vector and embed of previous input
+            # 1. encoder
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
+            # # 3. CTC loss
+            loss_ctc = self.ctc(hpad, hlens, ys)
+            # 4. Attention loss
+            # pass vis features to decoder, concatenating obj and plc features
+            vis_topic_var = torch.stack(vis_topic_var,dim=0)
+            loss_att, acc = self.dec(hpad, hlens, ys, vis_topic_var)
         else:
-            logging.warning('Only implemented adaptation 0,1,2,3 so far')
+            logging.warning('Only implemented adaptation (0-8) so far')
 
 
         return loss_ctc, loss_att, acc
@@ -385,9 +409,30 @@ class E2E(torch.nn.Module):
         h = to_cuda(self, Variable(torch.from_numpy(
             np.array(x, dtype=np.float32)), volatile=True))
 
+        '''
+        # read visual and topic features
+        # only topic adaptation
+        logging.warning(x)
+        logging.warning(x[1])
+        logging.warning(x[1]['topic_feat'])
+        if self.adaptation in [6,7,8]:
+            vis_topic = np.fromstring(x[1]['topic_feat'], dtype=np.float32, sep=' ')
+            vis_topic_var = to_cuda(self, Variable(torch.from_numpy(vis_topic)))
+            vis_topic_var = torch.stack(vis_topic_var, dim=0)
+        elif self.adaptation !=0:
+            vis_os_var = to_cuda(self, Variable(torch.from_numpy(np.fromstring(x[1]['obj_feat'], dtype=np.float32, sep=' '))))
+            vis_os_var = torch.stack(vis_os_var, dim=0)
+            vis_ps_var = to_cuda(self, Variable(torch.from_numpy(np.fromstring(x[1]['plc_feat'], dtype=np.float32, sep=' '))))
+            vis_ps_var = torch.stack(vis_ps_var, dim=0)
+            vis_all_var = torch.cat([vis_os_var, vis_ps_var], dim=1)
+        '''
+
         # 1. encoder
         # make a utt list (1) to use the same interface for encoder
         h, _ = self.enc(h.unsqueeze(0), ilen)
+
+        if(self.dump_h):
+            return h
 
         # calculate log P(z_t|X) for CTC scores
         if recog_args.ctc_weight > 0.0:
@@ -398,8 +443,22 @@ class E2E(torch.nn.Module):
         # 2. decoder
         # decode the first utterance
         if recog_args.beam_size == 1:
+            '''
+            if self.adaptation in [6,7,8]:
+                y = self.dec.recognize(h[0], recog_args, rnnlm, vis_topic_var)
+            elif self.adaptation != 0:
+                y = self.dec.recognize(h[0], recog_args, rnnlm, vis_all_var)
+            else:
+            '''
             y = self.dec.recognize(h[0], recog_args, rnnlm)
         else:
+            '''
+            if self.adaptation in [6,7,8]:
+                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_topic_var)
+            elif self.adaptation != 0:
+                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_all_var)
+            else:
+            '''
             y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm)
 
         if prev:
@@ -1642,17 +1701,29 @@ def th_accuracy(y_all, pad_target, ignore_label):
 # ------------- Decoder Network ----------------------------------------------------------------------------------------
 class Decoder(torch.nn.Module):
     def __init__(self, eprojs, odim, dlayers, dunits, sos, eos, att, verbose=0,
-                 char_list=None, labeldist=None, lsm_weight=0.):
+                 char_list=None, labeldist=None, lsm_weight=0., adaptation=None):
         super(Decoder, self).__init__()
         self.dunits = dunits
         self.dlayers = dlayers
+
+        self.adaptation = adaptation
+
         self.embed = torch.nn.Embedding(odim, dunits)
         self.decoder = torch.nn.ModuleList()
-        self.decoder += [torch.nn.LSTMCell(dunits + eprojs, dunits)]
+        if self.adaptation in [4,5]:
+            self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 200, dunits)]
+        elif self.adaptation in [6,7]:
+            self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 22, dunits)]
+        else:
+            self.decoder += [torch.nn.LSTMCell(dunits + eprojs, dunits)]
         for l in six.moves.range(1, self.dlayers):
             self.decoder += [torch.nn.LSTMCell(dunits, dunits)]
         self.ignore_id = 0  # NOTE: 0 for CTC?
-        self.output = torch.nn.Linear(dunits, odim)
+
+        if self.adaptation == 8:
+            self.output = torch.nn.Linear(dunits + 22, odim)
+        else:
+            self.output = torch.nn.Linear(dunits, odim)
 
         self.loss = None
         self.att = att
@@ -1669,7 +1740,7 @@ class Decoder(torch.nn.Module):
     def zero_state(self, hpad):
         return Variable(hpad.data.new(hpad.size(0), self.dunits).zero_())
 
-    def forward(self, hpad, hlen, ys):
+    def forward(self, hpad, hlen, ys, vis_feats=None):
         '''Decoder forward
 
         :param hs:
@@ -1712,7 +1783,11 @@ class Decoder(torch.nn.Module):
         # loop for an output sequence
         for i in six.moves.range(olength):
             att_c, att_w = self.att(hpad, hlen, z_list[0], att_w)
+            if self.adaptation in [4,6]:
+                att_c = torch.cat([att_c, vis_feats], dim=1)
             ey = torch.cat((eys[:, i, :], att_c), dim=1)  # utt x (zdim + hdim)
+            if self.adaptation in [5,7]:
+                ey = torch.cat([ey, vis_feats], dim=1)
             z_list[0], c_list[0] = self.decoder[0](ey, (z_list[0], c_list[0]))
             for l in six.moves.range(1, self.dlayers):
                 z_list[l], c_list[l] = self.decoder[l](
@@ -1720,8 +1795,14 @@ class Decoder(torch.nn.Module):
             z_all.append(z_list[-1])
 
         z_all = torch.stack(z_all, dim=1).view(batch * olength, self.dunits)
+        if self.adaptation == 8:
+            vis_feats = vis_feats.repeat(1, olength, 1)[0]
+            z_all = torch.cat([z_all, vis_feats], dim=1)
+            y_all = self.output(z_all)
+        else:
+            y_all = self.output(z_all)
+
         # compute loss
-        y_all = self.output(z_all)
         self.loss = F.cross_entropy(y_all, pad_ys_out.view(-1),
                                     ignore_index=self.ignore_id,
                                     size_average=True)
@@ -1756,7 +1837,7 @@ class Decoder(torch.nn.Module):
         return self.loss, acc
 
     # TODO(hori) incorporate CTC score
-    def recognize(self, h, recog_args, rnnlm=None):
+    def recognize(self, h, recog_args, rnnlm=None, vis_feats=None):
         '''greedy search implementation
 
         :param Variable h:
@@ -1810,7 +1891,7 @@ class Decoder(torch.nn.Module):
 
         return y_seq
 
-    def recognize_beam(self, h, lpz, recog_args, char_list, rnnlm=None):
+    def recognize_beam(self, h, lpz, recog_args, char_list, rnnlm=None, vis_feats=None):
         '''beam search implementation
 
         :param Variable h:
@@ -1869,7 +1950,14 @@ class Decoder(torch.nn.Module):
                 ey = self.embed(vy)           # utt list (1) x zdim
                 ey.unsqueeze(0)
                 att_c, att_w = self.att(h.unsqueeze(0), [h.size(0)], hyp['z_prev'][0], hyp['a_prev'])
+                if self.adaptation in [4,6]:
+                    att_c = torch.cat([att_c, vis_feats], dim=1)
                 ey = torch.cat((ey, att_c), dim=1)   # utt(1) x (zdim + hdim)
+                if self.adaptation in [5,7]:
+                    logging.warning(str(ey.shape))
+                    logging.warning(vis_feats)
+                    logging.warning(str(vis_feats.shape))
+                    ey = torch.cat([ey, vis_feats], dim=1)
                 z_list[0], c_list[0] = self.decoder[0](ey, (hyp['z_prev'][0], hyp['c_prev'][0]))
                 for l in six.moves.range(1, self.dlayers):
                     z_list[l], c_list[l] = self.decoder[l](

@@ -131,8 +131,12 @@ def main():
                         help='Path of the model to initialize with')
     # settings adaptation type
     parser.add_argument('--adaptation', default=0, type=int,
-                        choices=[0,1,2,3],
+                        choices=[0,1,3,4,5,6,7,8],
                         help='Specify type of attention to carry out')
+    parser.add_argument('--dump_h', default=False, type=bool,
+                         help='True if dumping hidden vectors h')
+    parser.add_argument('--dump_attn', default='false', type=str,
+                         help='True if dumping attention vectors')
     args = parser.parse_args()
 
     # logging info

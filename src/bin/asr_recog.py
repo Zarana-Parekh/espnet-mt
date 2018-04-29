@@ -64,10 +64,12 @@ def main():
                         help='RNNLM weight.')
 
     # dump attention and hidden vectors
-    parser.add_argument('--dump_h', default='false', type=str,
+    parser.add_argument('--dump_h', default=False, type=bool,
                         help='True if dumping hidden vectors h')
     parser.add_argument('--dump_attn', default='false', type=str,
                         help='True if dumping attention vectors')
+    parser.add_argument('--save_ark', type=str,
+                        help='Filename for dumping h')
 
     # for adaptation
     parser.add_argument('--adaptation', default=0, type=int,
