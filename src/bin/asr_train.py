@@ -8,6 +8,7 @@ import argparse
 import logging
 import os
 import random
+import subprocess
 import sys
 
 import numpy as np
@@ -158,6 +159,11 @@ def main():
 
     # check CUDA_VISIBLE_DEVICES
     if args.ngpu > 0:
+        if "clsp.jhu.edu" in subprocess.check_output(["hostname", "-f"]):
+            cvd = subprocess.check_output(["/usr/local/bin/free-gpu", "-n", str(args.ngpu)]).strip()
+            logging.info('CLSP: use gpu' + cvd)
+            os.environ['CUDA_VISIBLE_DEVICES'] = cvd
+
         cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
         if cvd is None:
             logging.warn("CUDA_VISIBLE_DEVICES is not set.")
