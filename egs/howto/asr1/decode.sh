@@ -62,7 +62,7 @@ END
  dump_h=False
 
  recog_set="dev_test held_out_test"
- #recog_set="dev_test"
+ recog_set="dev_test"
  #recog_set="held_out_test"
 
  . utils/parse_options.sh || exit 1;
@@ -89,7 +89,7 @@ END
  echo "dump_h: ${dump_h}"
 if [ ${stage} -le 5 ]; then
      echo "stage 5: Decoding"
-     nj=16
+     nj=8
 
      for rtask in ${recog_set}; do
      (

@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import pickle
+import numpy as np
 
 # chainer related
 import chainer
@@ -370,9 +371,22 @@ def recog(args):
             logging.info("Done with "+name)
         else:
             if args.beam_size == 1:
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+                if args.adaptation in [6,7,8]:
+                    topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
+                elif args.adaptation != 0:
+                    logging.warning('TODO adaptation recognition')
+                else:
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
             else:
-                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+	        if args.adaptation in [6,7,8]:
+                    topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
+                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
+                elif args.adaptation != 0:
+                    logging.warning('TODO adaptation recognition')
+                else:
+                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+
                 # get 1best and remove sos
                 y_hat = nbest_hyps[0]['yseq'][1:]
 

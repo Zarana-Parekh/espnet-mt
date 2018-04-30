@@ -393,7 +393,7 @@ class E2E(torch.nn.Module):
 
         return loss_ctc, loss_att, acc
 
-    def recognize(self, x, recog_args, char_list, rnnlm=None):
+    def recognize(self, x, recog_args, char_list, rnnlm=None, vis_feats=None):
         '''E2E greedy/beam search
 
         :param x:
@@ -409,23 +409,20 @@ class E2E(torch.nn.Module):
         h = to_cuda(self, Variable(torch.from_numpy(
             np.array(x, dtype=np.float32)), volatile=True))
 
-        '''
         # read visual and topic features
         # only topic adaptation
-        logging.warning(x)
-        logging.warning(x[1])
-        logging.warning(x[1]['topic_feat'])
         if self.adaptation in [6,7,8]:
-            vis_topic = np.fromstring(x[1]['topic_feat'], dtype=np.float32, sep=' ')
-            vis_topic_var = to_cuda(self, Variable(torch.from_numpy(vis_topic)))
-            vis_topic_var = torch.stack(vis_topic_var, dim=0)
+            vis_topic_var = to_cuda(self, Variable(torch.from_numpy(vis_feats)))
+            vis_topic_var = torch.stack(vis_topic_var, dim=1)
         elif self.adaptation !=0:
+            logging.warning('TODOD vis feat recognition')
+            '''
             vis_os_var = to_cuda(self, Variable(torch.from_numpy(np.fromstring(x[1]['obj_feat'], dtype=np.float32, sep=' '))))
             vis_os_var = torch.stack(vis_os_var, dim=0)
             vis_ps_var = to_cuda(self, Variable(torch.from_numpy(np.fromstring(x[1]['plc_feat'], dtype=np.float32, sep=' '))))
             vis_ps_var = torch.stack(vis_ps_var, dim=0)
             vis_all_var = torch.cat([vis_os_var, vis_ps_var], dim=1)
-        '''
+            '''
 
         # 1. encoder
         # make a utt list (1) to use the same interface for encoder
@@ -443,23 +440,21 @@ class E2E(torch.nn.Module):
         # 2. decoder
         # decode the first utterance
         if recog_args.beam_size == 1:
-            '''
             if self.adaptation in [6,7,8]:
                 y = self.dec.recognize(h[0], recog_args, rnnlm, vis_topic_var)
             elif self.adaptation != 0:
-                y = self.dec.recognize(h[0], recog_args, rnnlm, vis_all_var)
+                logging.warning('TODO')
+                #y = self.dec.recognize(h[0], recog_args, rnnlm, vis_all_var)
             else:
-            '''
-            y = self.dec.recognize(h[0], recog_args, rnnlm)
+                y = self.dec.recognize(h[0], recog_args, rnnlm)
         else:
-            '''
             if self.adaptation in [6,7,8]:
                 y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_topic_var)
             elif self.adaptation != 0:
-                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_all_var)
+                logging.warning('TODO')
+                #y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_all_var)
             else:
-            '''
-            y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm)
+                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm)
 
         if prev:
             self.train()
@@ -1954,17 +1949,20 @@ class Decoder(torch.nn.Module):
                     att_c = torch.cat([att_c, vis_feats], dim=1)
                 ey = torch.cat((ey, att_c), dim=1)   # utt(1) x (zdim + hdim)
                 if self.adaptation in [5,7]:
-                    logging.warning(str(ey.shape))
-                    logging.warning(vis_feats)
-                    logging.warning(str(vis_feats.shape))
                     ey = torch.cat([ey, vis_feats], dim=1)
                 z_list[0], c_list[0] = self.decoder[0](ey, (hyp['z_prev'][0], hyp['c_prev'][0]))
                 for l in six.moves.range(1, self.dlayers):
                     z_list[l], c_list[l] = self.decoder[l](
                         z_list[l - 1], (hyp['z_prev'][l], hyp['c_prev'][l]))
 
-                # get nbest local scores and their ids
-                local_att_scores = F.log_softmax(self.output(z_list[-1]), dim=1).data
+                # append to output of decoder, adaptation 8
+                if self.adaptation == 8:
+                    z_list_topic = torch.cat([z_list[-1], vis_feats], dim=1)
+                    # get nbest local scores and their ids
+                    local_att_scores = F.log_softmax(self.output(z_list_topic), dim=1).data
+                else:
+                    # get nbest local scores and their ids
+                    local_att_scores = F.log_softmax(self.output(z_list[-1]), dim=1).data
                 if rnnlm:
                     rnnlm_state, z_rnnlm = rnnlm.predictor(hyp['rnnlm_prev'], vy)
                     local_lm_scores = F.log_softmax(z_rnnlm, dim=1).data
