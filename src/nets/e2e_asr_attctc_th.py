@@ -415,14 +415,8 @@ class E2E(torch.nn.Module):
             vis_topic_var = to_cuda(self, Variable(torch.from_numpy(vis_feats)))
             vis_topic_var = torch.stack(vis_topic_var, dim=1)
         elif self.adaptation !=0:
-            logging.warning('TODOD vis feat recognition')
-            '''
-            vis_os_var = to_cuda(self, Variable(torch.from_numpy(np.fromstring(x[1]['obj_feat'], dtype=np.float32, sep=' '))))
-            vis_os_var = torch.stack(vis_os_var, dim=0)
-            vis_ps_var = to_cuda(self, Variable(torch.from_numpy(np.fromstring(x[1]['plc_feat'], dtype=np.float32, sep=' '))))
-            vis_ps_var = torch.stack(vis_ps_var, dim=0)
-            vis_all_var = torch.cat([vis_os_var, vis_ps_var], dim=1)
-            '''
+            vis_all_var = to_cuda(self, Variable(torch.from_numpy(vis_feats)))
+            vis_all_var = torch.stack(vis_all_var, dim=1)
 
         # 1. encoder
         # make a utt list (1) to use the same interface for encoder
@@ -443,16 +437,14 @@ class E2E(torch.nn.Module):
             if self.adaptation in [6,7]:
                 y = self.dec.recognize(h[0], recog_args, rnnlm, vis_topic_var)
             elif self.adaptation != 0:
-                logging.warning('TODO')
-                #y = self.dec.recognize(h[0], recog_args, rnnlm, vis_all_var)
+                y = self.dec.recognize(h[0], recog_args, rnnlm, vis_all_var)
             else:
                 y = self.dec.recognize(h[0], recog_args, rnnlm)
         else:
             if self.adaptation in [6,7]:
                 y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_topic_var)
             elif self.adaptation != 0:
-                logging.warning('TODO')
-                #y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_all_var)
+                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_all_var)
             else:
                 y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm)
 

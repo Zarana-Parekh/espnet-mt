@@ -217,7 +217,7 @@ def train(args):
         gpu_id = [-1]
 
     # Setup an optimizer
-    if args.opt == 'adadelta':
+    if args.opt == 'a8dadelta':
         optimizer = torch.optim.Adadelta(
             model.parameters(), rho=0.95, eps=args.eps)
     elif args.opt == 'adam':
@@ -387,7 +387,10 @@ def recog(args):
                     topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
                     y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
                 elif args.adaptation != 0:
-                    logging.warning('TODO adaptation recognition')
+                    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+                    plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
+                    vis_feat = np.append(obj_feat, plc_feat)
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
                 else:
                     y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
             else:
@@ -395,7 +398,10 @@ def recog(args):
                     topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
                     nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
                 elif args.adaptation != 0:
-                    logging.warning('TODO adaptation recognition')
+		    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+                    plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
+                    vis_feat = np.append(obj_feat, plc_feat)
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
                 else:
                     nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
 
