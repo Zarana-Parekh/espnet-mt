@@ -269,7 +269,7 @@ class E2E(torch.nn.Module):
         '''
         # utt list of frame x dim
         xs = [d[1]['feat'] for d in data]
-        if self.adaptation in [6,7,8]:
+        if self.adaptation in [6,7]:
             # vis feat list of 1 x 100 each
             vis_topic = [np.fromstring(d[1]['topic_feat'], dtype=np.float32, sep=' ') for d in data]
         elif self.adaptation != 0:
@@ -286,7 +286,7 @@ class E2E(torch.nn.Module):
         # re-order based on sorted_index
         xs = [xs[i] for i in sorted_index]
 
-        if self.adaptation in [6,7,8]:
+        if self.adaptation in [6,7]:
             # sort vis_topic vector
             vis_topic = [vis_topic[i] for i in sorted_index]
         elif self.adaptation != 0:
@@ -303,7 +303,7 @@ class E2E(torch.nn.Module):
         # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
 
-        if self.adaptation in [6,7,8]:
+        if self.adaptation in [6,7]:
             vis_topic_var = [to_cuda(self, Variable(torch.from_numpy(v_t))) for v_t in vis_topic]
         elif self.adaptation != 0:
             vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
@@ -341,7 +341,7 @@ class E2E(torch.nn.Module):
             # 4. attention loss
             loss_att, acc = self.dec(hpad_vis, hlens_vis, ys)
         elif self.adaptation in [4,5]:
-            # concatenating vis feats to context vector and embed of previous input
+            # concatenating vis feats to context vector and output of decoder
             # 1. encoder
             xpad = pad_list(hs)
             hpad, hlens = self.enc(xpad, ilens)
@@ -376,7 +376,7 @@ class E2E(torch.nn.Module):
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. attention loss
             loss_att, acc = self.dec(hpad, hlens, ys)
-        elif self.adaptation in [6,7,8]:
+        elif self.adaptation in [6,7]:
             # append topic information in the decoder: to context vector and embed of previous input
             # 1. encoder
             xpad = pad_list(hs)
@@ -388,7 +388,7 @@ class E2E(torch.nn.Module):
             vis_topic_var = torch.stack(vis_topic_var,dim=0)
             loss_att, acc = self.dec(hpad, hlens, ys, vis_topic_var)
         else:
-            logging.warning('Only implemented adaptation (0-8) so far')
+            logging.warning('Only implemented adaptation (0-7) so far')
 
 
         return loss_ctc, loss_att, acc
@@ -411,7 +411,7 @@ class E2E(torch.nn.Module):
 
         # read visual and topic features
         # only topic adaptation
-        if self.adaptation in [6,7,8]:
+        if self.adaptation in [6,7]:
             vis_topic_var = to_cuda(self, Variable(torch.from_numpy(vis_feats)))
             vis_topic_var = torch.stack(vis_topic_var, dim=1)
         elif self.adaptation !=0:
@@ -440,7 +440,7 @@ class E2E(torch.nn.Module):
         # 2. decoder
         # decode the first utterance
         if recog_args.beam_size == 1:
-            if self.adaptation in [6,7,8]:
+            if self.adaptation in [6,7]:
                 y = self.dec.recognize(h[0], recog_args, rnnlm, vis_topic_var)
             elif self.adaptation != 0:
                 logging.warning('TODO')
@@ -448,7 +448,7 @@ class E2E(torch.nn.Module):
             else:
                 y = self.dec.recognize(h[0], recog_args, rnnlm)
         else:
-            if self.adaptation in [6,7,8]:
+            if self.adaptation in [6,7]:
                 y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_topic_var)
             elif self.adaptation != 0:
                 logging.warning('TODO')
@@ -1705,9 +1705,9 @@ class Decoder(torch.nn.Module):
 
         self.embed = torch.nn.Embedding(odim, dunits)
         self.decoder = torch.nn.ModuleList()
-        if self.adaptation in [4,5]:
+        if self.adaptation == 4:
             self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 200, dunits)]
-        elif self.adaptation in [6,7]:
+        elif self.adaptation == 6:
             self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 22, dunits)]
         else:
             self.decoder += [torch.nn.LSTMCell(dunits + eprojs, dunits)]
@@ -1715,7 +1715,10 @@ class Decoder(torch.nn.Module):
             self.decoder += [torch.nn.LSTMCell(dunits, dunits)]
         self.ignore_id = 0  # NOTE: 0 for CTC?
 
-        if self.adaptation == 8:
+        if self.adaptation ==5:
+            # to a further dimensionality reduction of vis feats if 200 dim is too big
+            self.output = torch.nn.Linear(dunits + 200, odim)
+        elif self.adaptation == 7:
             self.output = torch.nn.Linear(dunits + 22, odim)
         else:
             self.output = torch.nn.Linear(dunits, odim)
@@ -1781,8 +1784,6 @@ class Decoder(torch.nn.Module):
             if self.adaptation in [4,6]:
                 att_c = torch.cat([att_c, vis_feats], dim=1)
             ey = torch.cat((eys[:, i, :], att_c), dim=1)  # utt x (zdim + hdim)
-            if self.adaptation in [5,7]:
-                ey = torch.cat([ey, vis_feats], dim=1)
             z_list[0], c_list[0] = self.decoder[0](ey, (z_list[0], c_list[0]))
             for l in six.moves.range(1, self.dlayers):
                 z_list[l], c_list[l] = self.decoder[l](
@@ -1790,7 +1791,7 @@ class Decoder(torch.nn.Module):
             z_all.append(z_list[-1])
 
         z_all = torch.stack(z_all, dim=1).view(batch * olength, self.dunits)
-        if self.adaptation == 8:
+        if self.adaptation in [5,7]:
             vis_feats = vis_feats.repeat(1, olength, 1)[0]
             z_all = torch.cat([z_all, vis_feats], dim=1)
             y_all = self.output(z_all)
@@ -1948,15 +1949,13 @@ class Decoder(torch.nn.Module):
                 if self.adaptation in [4,6]:
                     att_c = torch.cat([att_c, vis_feats], dim=1)
                 ey = torch.cat((ey, att_c), dim=1)   # utt(1) x (zdim + hdim)
-                if self.adaptation in [5,7]:
-                    ey = torch.cat([ey, vis_feats], dim=1)
                 z_list[0], c_list[0] = self.decoder[0](ey, (hyp['z_prev'][0], hyp['c_prev'][0]))
                 for l in six.moves.range(1, self.dlayers):
                     z_list[l], c_list[l] = self.decoder[l](
                         z_list[l - 1], (hyp['z_prev'][l], hyp['c_prev'][l]))
 
-                # append to output of decoder, adaptation 8
-                if self.adaptation == 8:
+                # append to output of decoder, adaptation 5,7
+                if self.adaptation in [5,7]:
                     z_list_topic = torch.cat([z_list[-1], vis_feats], dim=1)
                     # get nbest local scores and their ids
                     local_att_scores = F.log_softmax(self.output(z_list_topic), dim=1).data
