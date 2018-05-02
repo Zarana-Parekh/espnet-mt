@@ -4,11 +4,11 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 # to run:
 : <<'END'
-initpath=exp/90h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs44_mli800_mlo150_lsmunigram0.05/results/model.acc.best
+initpath=exp/480h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs40_mli800_mlo150_lsmunigram0.05/results/model.acc.best
 
 resumepath=exp/480h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs40_mli800_mlo150_lsmunigram0.05/results/snapshot_iter_136408
 
-./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 1 --epochs 20 --batchsize 40 --target char --initchar false --vis_feat false --stage 4
+./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 1 --epochs 20 --batchsize 48 --target word --initchar $initpath --vis_feat false --stage 4
 
 ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --ngpu 1 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target bpe --nbpe 300 --initchar $initpath --vis_feat false --stage 4
 END
@@ -301,7 +301,7 @@ else
 fi
 
 if [ -z ${tag} ]; then
-    expdir=${expdir_main}/${train_set}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=${expdir_main}/${train_set}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}_initchar
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -357,7 +357,7 @@ if [ ${stage} -le 4 ]; then
         --initchar ${initchar}
 fi
 
-if [ ${stage} -le 5 ]; then
+if [ ${stage} -le 9998 ]; then
     echo "stage 5: Decoding"
     nj=32
 

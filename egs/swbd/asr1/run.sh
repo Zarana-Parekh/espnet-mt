@@ -5,7 +5,7 @@
 # to run:
 : <<'END'
 initpath=false
-./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/swbd_data --datadir data --gpu 0 --epochs 25 --batchsize 48 --lm_weight 0.3 --bplen 100 --stage 0 --target char --initchar $initpath
+./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/swbd_data --datadir data --ngpu 1 --epochs 20 --batchsize 48 --stage 1 --target char --initchar $initpath
 END
 
 . ./path.sh
@@ -78,10 +78,11 @@ ctc_weight=0.3
 recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
 
 # target unit related
-nbpe=500
+nbpe=300
 initchar=
 target=
 bplen=35
+adaptation=0
 
 # dumping encoder hidden vector weights or attention weights
 dump_h=false
@@ -119,6 +120,7 @@ set -o pipefail
 
 train_set=train_nodup
 train_dev=train_dev
+train_test=eval2000
 recog_set="train_dev eval2000"
 
 if [ ${stage} -le 0 ]; then
@@ -167,29 +169,33 @@ fi
 
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
+feat_te_dir=${dumpdir}/${train_test}/delta${do_delta}; mkdir -p ${feat_te_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train eval2000; do
-        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 32 data/${x} exp/make_fbank/${x} ${fbankdir}
-    done
+    #for x in train eval2000; do
+    #    steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 32 data/${x} exp/make_fbank/${x} ${fbankdir}
+    #done
 
-	utils/subset_data_dir.sh --first data/train 4000 data/${train_dev} # 5hr 6min
-    n=$[`cat data/train/segments | wc -l` - 4000]
-    utils/subset_data_dir.sh --last data/train $n data/train_nodev
-    utils/data/remove_dup_utts.sh 300 data/train_nodev data/${train_set} # 286hr
+	#utils/subset_data_dir.sh --first data/train 4000 data/${train_dev} # 5hr 6min
+    #n=$[`cat data/train/segments | wc -l` - 4000]
+    #utils/subset_data_dir.sh --last data/train $n data/train_nodev
+    #utils/data/remove_dup_utts.sh 300 data/train_nodev data/${train_set} # 286hr
 
     # compute global CMVN
-    compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
+    #compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
 
     # dump features for training
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
         data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
         data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
+        data/${train_test}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/te ${feat_te_dir}
+    exit 1;
 fi
 
 dict=data/lang_1char/${train_set}_${target}_units.txt
@@ -211,15 +217,16 @@ if [ ${stage} -le 2 ]; then
 
     if [ "${target}" == "char" ]; then
         echo "Character model"
+        # keeping only those units that occur more than 50 times
         text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-            | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+            | sort | uniq -c | awk '$1>=50{print $2}' | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
         echo "<space> 2" >> ${dict}
-        # learn bpe units
+        # learn bpe units, keeping only those units that occur more than 50 times
         cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
         cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
-            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+            | tr ' ' '\n' | sort | uniq -c | awk '$1>=50{print $2}' | awk '{print $0 " " NR+2}' >> ${dict}
     elif [ "${target}" == "word" ]; then
         echo "Word model"
         cut -f 2- -d" " data/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
@@ -237,13 +244,16 @@ if [ ${stage} -le 2 ]; then
     data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
          data/${train_dev} ${dict} > ${feat_dt_dir}/data_${target}.json
+    data2json.sh --feat ${feat_te_dir}/feats.scp --nlsyms ${nlsyms} \
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
+         data/${train_test} ${dict} > ${feat_te_dir}/data_${target}.json
 fi
 
 # It takes a few days. If you just want to end-to-end ASR without LM,
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
 lmexpdir=exp/train_${target}_rnnlm_2layer_bs2048
 mkdir -p ${lmexpdir}
-if [ ${stage} -le 3 ]; then
+if [ ${stage} -le -999 ]; then
     echo "stage 3: LM Preparation"
     lmdatadir=data/local/lm_train_${target}
     mkdir -p ${lmdatadir}
@@ -290,7 +300,7 @@ if [ ${stage} -le 3 ]; then
 fi
 
 if [ -z ${tag} ]; then
-    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -343,10 +353,12 @@ if [ ${stage} -le 4 ]; then
         --maxlen-out ${maxlen_out} \
         --opt ${opt} \
         --epochs ${epochs} \
-        --initchar ${initchar}
+        --initchar ${initchar} \
+        --adaptation ${adaptation}
 fi
+echo "Finished"
 
-if [ ${stage} -le 5 ]; then
+if [ ${stage} -le -999 ]; then
     echo "stage 5: Decoding"
     nj=32
 

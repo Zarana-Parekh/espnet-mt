@@ -115,6 +115,7 @@ def main():
 
     # recog
     logging.info('backend = ' + args.backend)
+    logging.warning('adaptation = ' + str(args.adaptation))
     if args.backend == "chainer":
         from asr_chainer import recog
         recog(args)

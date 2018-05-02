@@ -18,15 +18,14 @@
 #SBATCH --export=ALL
 #SBATCH --time=48:00:00
 
-
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
 # to run:
 : <<'END'
-expath=exp/480h/train_word_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs40_mli800_mlo150_lsmunigram0.05_alldat
+expath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05_47units
 
-./decode.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target word --datadir data/480h --dumpdir /tmp/spalaska/howto_data_480h --dump_h False --recog_set dev_test
+./decode.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target char --datadir data --dumpdir /tmp/spalaska/wsj_data --dump_h False --recog_set test_eval92
 END
  . ./path.sh
  . ./cmd.sh
@@ -78,7 +77,7 @@ END
 
  uname -n
  echo "expdir: ${expdir}"
- dict=${datadir}/lang_1char/train_${target}_units.txt
+ dict=${datadir}/lang_1char/train_si284_${target}_units.txt
  echo "dictionary: ${dict}"
 
  modeldir=${expdir}/results/model.${recog_model}

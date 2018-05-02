@@ -5,7 +5,7 @@
 # to run:
 : <<'END'
 initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
-./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/wsj_data --datadir data --gpu 0 --epochs 15 --batchsize 48 --lm_weight 0.3 --bplen 35 --stage 3 --target word --initchar $initpath
+./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/wsj_data --datadir data --ngpu 1 --epochs 15 --batchsize 48 --stage 4 --target char --initchar false
 END
 
 . ./path.sh
@@ -78,7 +78,7 @@ ctc_weight=0.3
 recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
 
 # target unit related
-nbpe=500
+nbpe=300
 initchar=
 target=
 bplen=35
@@ -118,6 +118,7 @@ set -o pipefail
 
 train_set=train_si284
 train_dev=test_dev93
+train_test=test_eval92
 recog_set="test_dev93 test_eval92"
 
 if [ ${stage} -le 0 ]; then
@@ -146,24 +147,28 @@ fi
 
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
+feat_te_dir=${dumpdir}/${train_test}/delta${do_delta}; mkdir -p ${feat_te_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train_si284 test_dev93 test_eval92; do
-        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 10 data/${x} exp/make_fbank/${x} ${fbankdir}
-    done
+   # for x in train_si284 test_dev93 test_eval92; do
+   #     steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 10 data/${x} exp/make_fbank/${x} ${fbankdir}
+   # done
 
     # compute global CMVN
-    compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
+    #compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
 
     # dump features for training
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
         data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
         data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
+        data/${train_test}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_te_dir}
+    exit 1;
 fi
 
 dict=data/lang_1char/${train_set}_${target}_units.txt
@@ -185,18 +190,19 @@ if [ ${stage} -le 2 ]; then
 
     if [ "${target}" == "char" ]; then
         echo "Character model"
+        # keeping only those units that occur more than 50 times
         text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-            | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+            | sort | uniq -c | awk '$1>=50{print $2}' | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
         echo "<space> 2" >> ${dict}
-        # learn bpe units
+        # learn bpe units, # keeping only those units that occur more than 50 times
         cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
         cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
-            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+            | tr ' ' '\n' | sort | uniq -c | awk '$1>=50{print $2}' | awk '{print $0 " " NR+2}' >> ${dict}
     elif [ "${target}" == "word" ]; then
         echo "Word model"
-        cut -f 2- -d" " data/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        cut -f 2- -d" " data/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=3{print $2}'\
             | awk '{print $0 " " NR+1}' >> ${dict}
     else
         echo "Wrong target units specified, exiting."
@@ -217,7 +223,7 @@ fi
 # you can skip this and remove --rnnlm option in the recognition (stage 5)
 lmexpdir=exp/train_${target}_rnnlm_2layer_bs2048
 mkdir -p ${lmexpdir}
-if [ ${stage} -le 3 ]; then
+if [ ${stage} -le -999 ]; then
     echo "stage 3: LM Preparation"
     lmdatadir=data/local/lm_train_${target}
     mkdir -p ${lmdatadir}
@@ -271,7 +277,7 @@ if [ ${stage} -le 3 ]; then
 fi
 
 if [ -z ${tag} ]; then
-    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -327,7 +333,7 @@ if [ ${stage} -le 4 ]; then
         --initchar ${initchar}
 fi
 
-if [ ${stage} -le 5 ]; then
+if [ ${stage} -le -9997 ]; then
     echo "stage 5: Decoding"
     nj=32
 
