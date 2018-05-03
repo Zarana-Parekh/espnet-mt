@@ -26,6 +26,8 @@ from ctc_prefix_score import CTCPrefixScore
 from e2e_asr_common import end_detect
 from e2e_asr_common import label_smoothing_dist
 
+from nltk.translate.bleu_score import sentence_bleu
+
 CTC_LOSS_THRESHOLD = 10000
 CTC_SCORING_RATIO = 1.5
 MAX_DECODER_OUTPUT = 5
@@ -131,8 +133,10 @@ def pad_list(xs, pad_value=float("nan")):
     assert isinstance(xs[0], Variable)
     n_batch = len(xs)
     max_len = max(x.size(0) for x in xs)
-    pad = Variable(xs[0].data.new(n_batch, max_len, *
-                                  xs[0].size()[1:]).zero_() + pad_value)
+    #pad = Variable(xs[0].data.new(n_batch, max_len, *xs[0].size()[1:]).zero_() + 50001)
+    pad = Variable(xs[0].data.new(n_batch, max_len, *xs[0].size()[1:]).zero_() + 50002)
+
+    # removed pad_value
     for i in range(n_batch):
         pad[i, :xs[i].size(0)] = xs[i]
     return pad
@@ -154,8 +158,8 @@ class E2E(torch.nn.Module):
 
         # below means the last number becomes eos/sos ID
         # note that sos/eos IDs are identical
-        self.sos = odim - 1
-        self.eos = odim - 1
+        self.sos = 50001
+        self.eos = 50001
 
         # subsample info
         # +1 means input (+1) and layers outputs (args.elayer)
@@ -180,6 +184,10 @@ class E2E(torch.nn.Module):
         # encoder
         self.enc = Encoder(args.etype, idim, args.elayers, args.eunits, args.eprojs,
                            self.subsample, args.dropout_rate)
+
+        #self.embed = torch.nn.Embedding(embedding_dim=idim, num_embeddings=50002, padding_idx=50001)
+        self.embed = torch.nn.Embedding(embedding_dim=idim, num_embeddings=50003, padding_idx=50002)
+
         # ctc
         self.ctc = CTC(odim, args.eprojs, args.dropout_rate)
         # attention
@@ -263,9 +271,10 @@ class E2E(torch.nn.Module):
         :return:
         '''
         # utt list of frame x dim
-        xs = [d[1]['feat'] for d in data]
+        xs = [np.array(map(int, d[1]['tokens_en'].split())) for d in data]
+
         # remove 0-output-length utterances
-        tids = [d[1]['tokenid'].split() for d in data]
+        tids = [map(int, d[1]['tokens_pt'].split()) for d in data]
         filtered_index = filter(lambda i: len(tids[i]) > 0, range(len(xs)))
         sorted_index = sorted(filtered_index, key=lambda i: -len(xs[i]))
         if len(sorted_index) != len(xs):
@@ -278,13 +287,14 @@ class E2E(torch.nn.Module):
         ys = [to_cuda(self, Variable(torch.from_numpy(y))) for y in ys]
 
         # subsample frame
-        xs = [xx[::self.subsample[0], :] for xx in xs]
+        #xs = [xx[::self.subsample[0], :] for xx in xs]
         ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
 
         # 1. encoder
-        xpad = pad_list(hs)
-        hpad, hlens = self.enc(xpad, ilens)
+        xpad = pad_list(hs).long()
+        xembed = self.embed(xpad) 
+        hpad, hlens = self.enc(xembed, ilens)
 
         # # 3. CTC loss
         loss_ctc = self.ctc(hpad, hlens, ys)
@@ -305,14 +315,17 @@ class E2E(torch.nn.Module):
         prev = self.training
         self.eval()
         # subsample frame
-        x = x[::self.subsample[0], :]
-        ilen = [x.shape[0]]
+        #x = x[::self.subsample[0], :]
+        x_int = np.array(map(int, x.encode('ascii', 'ignore').split()))
+        ilen = [x_int.shape[0]]
         h = to_cuda(self, Variable(torch.from_numpy(
-            np.array(x, dtype=np.float32)), volatile=True))
+            np.array(x_int, dtype=np.float32)), volatile=True))
 
         # 1. encoder
         # make a utt list (1) to use the same interface for encoder
-        h, _ = self.enc(h.unsqueeze(0), ilen)
+        xembed = self.embed(h.unsqueeze(0).long())
+        #h, _ = self.enc(h.unsqueeze(0), ilen)
+        h, _ = self.enc(xembed, ilen)
 
         # calculate log P(z_t|X) for CTC scores
         if recog_args.ctc_weight > 0.0:
@@ -1555,6 +1568,7 @@ class AttMultiHeadMultiResLoc(torch.nn.Module):
 
 
 def th_accuracy(y_all, pad_target, ignore_label):
+    ignore_label = 50002
     pad_pred = y_all.data.view(pad_target.size(
         0), pad_target.size(1), y_all.size(1)).max(2)[1]
     mask = pad_target.data != ignore_label
@@ -1562,6 +1576,11 @@ def th_accuracy(y_all, pad_target, ignore_label):
         mask) == pad_target.data.masked_select(mask))
     denominator = torch.sum(mask)
     return float(numerator) / float(denominator)
+
+def th_accuracy_mt(y_all, pad_target):
+     target = [str(x) for x in pad_target.cpu().numpy().tolist()]
+     y = [str(x) for x in y_all.cpu().numpy().tolist()]
+     return sentence_bleu(target, y, weights=(0.25, 0.25, 0.25, 0.25))
 
 
 # ------------- Decoder Network ----------------------------------------------------------------------------------------
@@ -1571,13 +1590,15 @@ class Decoder(torch.nn.Module):
         super(Decoder, self).__init__()
         self.dunits = dunits
         self.dlayers = dlayers
-        self.embed = torch.nn.Embedding(odim, dunits)
+        #self.embed = torch.nn.Embedding(odim, dunits)
+        #self.embed = torch.nn.Embedding(num_embeddings=odim+2, embedding_dim=dunits, padding_idx=odim+1)
+        self.embed = torch.nn.Embedding(num_embeddings=50003, embedding_dim=dunits, padding_idx=50002)
         self.decoder = torch.nn.ModuleList()
         self.decoder += [torch.nn.LSTMCell(dunits + eprojs, dunits)]
         for l in six.moves.range(1, self.dlayers):
             self.decoder += [torch.nn.LSTMCell(dunits, dunits)]
         self.ignore_id = 0  # NOTE: 0 for CTC?
-        self.output = torch.nn.Linear(dunits, odim)
+        self.output = torch.nn.Linear(dunits, 50003) # odim+2
 
         self.loss = None
         self.att = att
@@ -1647,6 +1668,22 @@ class Decoder(torch.nn.Module):
         z_all = torch.stack(z_all, dim=1).view(batch * olength, self.dunits)
         # compute loss
         y_all = self.output(z_all)
+        #_, pred_idx = torch.max(y_all, -1)
+        #acc = th_accuracy_mt(pred_idx.view(pad_ys_out.shape).data, pad_ys_out.data)
+
+        # evaluation
+        '''
+        pred_reshaped = pred_idx.view(pad_ys_out.shape)
+        with open('../exp/pred.txt', 'w') as pred_file:
+             for sentence in pred_reshaped.data:
+                 prediction = [self.char_list[int(curr_idx)].encode('ascii', 'ignore')[:-1]  for curr_idx in sentence]
+                 pred_file.write(" ".join(prediction) + '\n')
+        with open('../exp/gt.txt', 'w') as gt_file:
+             for sentence in pad_ys_out.data:
+                  ground_truth = [self.char_list[int(curr_idx)].encode('ascii', 'ignore') for curr_idx in sentence]
+                  gt_file.write(" ".join(prediction) + '\n')
+        '''
+
         self.loss = F.cross_entropy(y_all, pad_ys_out.view(-1),
                                     ignore_index=self.ignore_id,
                                     size_average=True)
@@ -1765,7 +1802,7 @@ class Decoder(torch.nn.Module):
             maxlen = h.shape[0]
         else:
             # maxlen >= 1
-            maxlen = max(1, int(recog_args.maxlenratio * h.size(0)))
+            maxlen = max(1, int(recog_args.maxlenratio * h.size(0)) + 20)
         minlen = int(recog_args.minlenratio * h.size(0))
         logging.info('max output length: ' + str(maxlen))
         logging.info('min output length: ' + str(minlen))
@@ -1848,8 +1885,8 @@ class Decoder(torch.nn.Module):
             # sort and get nbest
             hyps = hyps_best_kept
             logging.debug('number of pruned hypothes: ' + str(len(hyps)))
-            logging.debug(
-                'best hypo: ' + ''.join([char_list[int(x)] for x in hyps[0]['yseq'][1:]]))
+            #logging.debug(
+            #    'best hypo: ' + ''.join([char_list[int(x)] for x in hyps[0]['yseq'][1:]]))
 
             # add eos in the final loop to avoid that there are no ended hyps
             if i == maxlen - 1:
@@ -1882,9 +1919,9 @@ class Decoder(torch.nn.Module):
                 logging.info('no hypothesis. Finish decoding.')
                 break
 
-            for hyp in hyps:
-                logging.debug(
-                    'hypo: ' + ''.join([char_list[int(x)] for x in hyp['yseq'][1:]]))
+            #for hyp in hyps:
+            #    logging.debug(
+            #        'hypo: ' + ''.join([char_list[int(x)] for x in hyp['yseq'][1:]]))
 
             logging.debug('number of ended hypothes: ' + str(len(ended_hyps)))
 

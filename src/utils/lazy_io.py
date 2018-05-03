@@ -35,6 +35,12 @@ class ScpLazyDict(object):
     def __getitem__(self, item):
         return read_mat(self.loader_dict[item.decode('utf-8')])
 
+class MTLazyDict(ScpLazyDict):
+    def __init__(self, loader_dict):
+        self.loader_dict = loader_dict
+
+   def __getitem__(self, item):
+        return self.loader_dict[item.decode('utf-8')]
 
 def read_dict_scp(file_or_fd):
     """ ScpLazyDict = read_mat_scp(file_or_fd)
@@ -51,3 +57,16 @@ def read_dict_scp(file_or_fd):
         if fd is not file_or_fd:
             fd.close()
     return ScpLazyDict(d)
+
+def read_dict_mt(file_or_fd, key):
+    fd = open(file_or_fd, 'r')
+    d = dict()
+    try:
+        import json
+        temp_dict = json.load(fd)['utts']
+        for k, v in temp_dict.items():
+            d[k] = v[key]
+    finally:
+        if fd is not file_or_fd:
+            fd.close()
+    return MTLazyDict(d)

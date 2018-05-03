@@ -49,12 +49,23 @@ def converter_kaldi(batch, reader):
 
     return batch
 
+def converter_mt(batch):
+    new_batch = []
+    for data in batch:
+         video_id, vid_dict = data
+         vid_dict = {k.encode('ascii', 'ignore'): v.encode('ascii', 'ignore') for k,v in vid_dict.iteritems()}
+         new_batch.append((video_id, vid_dict))
+    return new_batch
+       
 
 def delete_feat(batch):
     for data in batch:
         del data[1]['feat']
 
     return batch
+
+def delete_feat_mt(batch):
+    del batch[:]
 
 
 # * -------------------- chainer extension related -------------------- *

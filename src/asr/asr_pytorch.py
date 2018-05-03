@@ -22,8 +22,8 @@ import torch
 # spnet related
 from asr_utils import adadelta_eps_decay
 from asr_utils import CompareValueTrigger
-from asr_utils import converter_kaldi
-from asr_utils import delete_feat
+from asr_utils import converter_kaldi, converter_mt
+from asr_utils import delete_feat, delete_feat_mt
 from asr_utils import make_batchset
 from asr_utils import restore_snapshot
 from e2e_asr_attctc_th import E2E
@@ -72,10 +72,12 @@ class PytorchSeqEvaluaterKaldi(extensions.Evaluator):
                 # x: original json with loaded features
                 #    will be converted to chainer variable later
                 # batch only has one minibatch utterance, which is specified by batch[0]
-                x = converter_kaldi(batch[0], self.reader)
+                #x = converter_kaldi(batch[0], self.reader)
+                x = converter_mt(batch[0])
                 self.model.eval()
                 self.model(x)
-                delete_feat(x)
+                #delete_feat(x)
+                delete_feat_mt(x)
 
             summary.add(observation)
 
@@ -106,7 +108,9 @@ class PytorchSeqUpdaterKaldi(training.StandardUpdater):
         # x: original json with loaded features
         #    will be converted to chainer variable later
         # batch only has one minibatch utterance, which is specified by batch[0]
-        x = converter_kaldi(batch[0], self.reader)
+        #x = converter_kaldi(batch[0], self.reader)
+        video_ids = [x[0].encode('ascii') for x in batch[0]]
+        x = converter_mt(batch[0])
 
         # Compute the loss at this time step and accumulate it
         loss = self.model(x)
@@ -121,7 +125,8 @@ class PytorchSeqUpdaterKaldi(training.StandardUpdater):
             logging.warning('grad norm is nan. Do not update model.')
         else:
             optimizer.step()
-        delete_feat(x)
+        #delete_feat(x)
+        delete_feat_mt(x)
 
 
 def train(args):
@@ -153,8 +158,8 @@ def train(args):
     utts = list(valid_json.keys())
     idim = int(valid_json[utts[0]]['idim'])
     odim = int(valid_json[utts[0]]['odim'])
-    logging.info('#input dims : ' + str(idim))
-    logging.info('#output dims: ' + str(odim))
+    idim = 300
+    odim = 50001
 
     # specify model architecture
     e2e = E2E(idim, odim, args)
@@ -210,8 +215,8 @@ def train(args):
         valid, 1, repeat=False, shuffle=False)
 
     # prepare Kaldi reader
-    train_reader = lazy_io.read_dict_scp(args.train_feat)
-    valid_reader = lazy_io.read_dict_scp(args.valid_feat)
+    train_reader = lazy_io.read_dict_mt(args.train_feat, 'tokens_en') #lazy_io.read_dict_scp(args.train_feat)
+    valid_reader = lazy_io.read_dict_mt(args.valid_feat, 'tokens_en') #lazy_io.read_dict_scp(args.valid_feat)
 
     # Set up a trainer
     updater = PytorchSeqUpdaterKaldi(
@@ -323,14 +328,18 @@ def recog(args):
         rnnlm = None
 
     # prepare Kaldi reader
-    reader = kaldi_io_py.read_mat_ark(args.recog_feat)
+    #reader = kaldi_io_py.read_mat_ark(args.recog_feat)
+    reader = lazy_io.read_dict_mt(args.recog_feat, 'tokens_en')
 
     # read json data
     with open(args.recog_label, 'rb') as f:
         recog_json = json.load(f)['utts']
 
+    #pred_file = open('/data/ASR5/zpp/espnet/egs/howto/exp/pred.txt', 'w')
+    #gt_file = open('/data/ASR5/zpp/espnet/egs/howto/exp/gt.txt', 'w')
+
     new_json = {}
-    for name, feat in reader:
+    for name, feat in reader.loader_dict.items():
         if args.beam_size == 1:
             y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
         else:
@@ -338,15 +347,18 @@ def recog(args):
             # get 1best and remove sos
             y_hat = nbest_hyps[0]['yseq'][1:]
 
-        y_true = map(int, recog_json[name]['tokenid'].split())
+        #y_true = map(int, recog_json[name]['tokenid'].split())
+        y_true = map(int, recog_json[name]['tokens_pt'].encode('ascii', 'ignore').split())
 
         # print out decoding result
-        seq_hat = [train_args.char_list[int(idx)] for idx in y_hat]
-        seq_true = [train_args.char_list[int(idx)] for idx in y_true]
-        seq_hat_text = "".join(seq_hat).replace('<space>', ' ')
-        seq_true_text = "".join(seq_true).replace('<space>', ' ')
+        seq_hat = [train_args.char_list[int(idx)] for idx in y_hat if train_args.char_list[int(idx)] != '<eos>']
+        seq_true = [train_args.char_list[int(idx)] for idx in y_true if train_args.char_list[int(idx)] != '<eos>']
+        seq_hat_text = " ".join(seq_hat).replace('<space>', ' ')
+        seq_true_text = " ".join(seq_true).replace('<space>', ' ')
         logging.info("groundtruth[%s]: " + seq_true_text, name)
         logging.info("prediction [%s]: " + seq_hat_text, name)
+        #pred_file.write(seq_hat_text.encode('ascii', 'ignore') + '\n')
+        #gt_file.write(seq_true_text.encode('ascii', 'ignore') + '\n')
 
         # copy old json info
         new_json[name] = recog_json[name]
@@ -374,3 +386,7 @@ def recog(args):
     # TODO(watanabe) fix character coding problems when saving it
     with open(args.result_label, 'wb') as f:
         f.write(json.dumps({'utts': new_json}, indent=4, sort_keys=True).encode('utf_8'))
+
+
+    #pred_file.close()
+    #gt_file.close()
