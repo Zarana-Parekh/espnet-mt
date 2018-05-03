@@ -276,8 +276,11 @@ class E2E(torch.nn.Module):
         :return:
         '''
         # utt list of frame x dim
+<<<<<<< HEAD
         xs = [np.array(map(int, d[1]['tokens_en'].split())) for d in data]
 
+=======
+        xs = [d[1]['feat'] for d in data]
         if self.adaptation in [6,7]:
             # vis feat list of 1 x 100 each
             vis_topic = [np.fromstring(d[1]['topic_feat'], dtype=np.float32, sep=' ') for d in data]
@@ -285,6 +288,7 @@ class E2E(torch.nn.Module):
             # vis feat list of 1 x 100 each
             vis_os = [np.fromstring(d[1]['obj_feat'], dtype=np.float32, sep=' ') for d in data]
             vis_ps = [np.fromstring(d[1]['plc_feat'], dtype=np.float32, sep=' ') for d in data]
+>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
         # remove 0-output-length utterances
         tids = [map(int, d[1]['tokens_pt'].split()) for d in data]
         filtered_index = filter(lambda i: len(tids[i]) > 0, range(len(xs)))
@@ -312,6 +316,15 @@ class E2E(torch.nn.Module):
         # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
 
+<<<<<<< HEAD
+        # 1. encoder
+        xpad = pad_list(hs).long()
+        xembed = self.embed(xpad) 
+        hpad, hlens = self.enc(xembed, ilens)
+
+        # # 3. CTC loss
+        loss_ctc = self.ctc(hpad, hlens, ys)
+=======
         if self.adaptation in [6,7]:
             vis_topic_var = [to_cuda(self, Variable(torch.from_numpy(v_t))) for v_t in vis_topic]
         elif self.adaptation != 0:
@@ -321,10 +334,8 @@ class E2E(torch.nn.Module):
         if self.adaptation == 0:
             # no adaptation
             # 1. encoder
-            xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
-
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
             # # 3. CTC loss
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. attention loss
@@ -332,9 +343,8 @@ class E2E(torch.nn.Module):
         elif self.adaptation == 1:
             # concatenating vis feats to hidden vector
             # 1. encoder
-	    xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
             #B*T*320
             #logging.warning('original hpad size: ' + str(hpad.size()))
             # saving to new Variable
@@ -355,9 +365,8 @@ class E2E(torch.nn.Module):
         elif self.adaptation in [4,5]:
             # concatenating vis feats to context vector and output of decoder
             # 1. encoder
-	    xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
             # # 3. CTC loss
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. Attention loss
@@ -380,12 +389,11 @@ class E2E(torch.nn.Module):
                 vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
                 hs_vis[b] = torch.cat([hs[b],vis_os_var[b],vis_ps_var[b]], dim=1)
             #logging.warning('adapted hs_vis : ' + str(hs_vis[0].size()))
-            xpad = pad_list(hs_vis).long()
-	    xembed = self.embed(xpad)
+            xpad = pad_list(hs_vis)
 
             # pass adapted input to encoder
             # the Encoder.idim needs to be modified in this case
-            hpad, hlens = self.enc(xembed, ilens)
+            hpad, hlens = self.enc(xpad, ilens)
             # # 3. CTC loss
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. attention loss
@@ -393,9 +401,8 @@ class E2E(torch.nn.Module):
         elif self.adaptation in [6,7]:
             # append topic information in the decoder: to context vector and embed of previous input
             # 1. encoder
-	    xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
+            xpad = pad_list(hs)
+            hpad, hlens = self.enc(xpad, ilens)
             # # 3. CTC loss
             loss_ctc = self.ctc(hpad, hlens, ys)
             # 4. Attention loss
@@ -404,6 +411,8 @@ class E2E(torch.nn.Module):
             loss_att, acc = self.dec(hpad, hlens, ys, vis_topic_var)
         else:
             logging.warning('Only implemented adaptation (0-7) so far')
+>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
+
 
         return loss_ctc, loss_att, acc
 
@@ -1715,12 +1724,16 @@ class Decoder(torch.nn.Module):
         super(Decoder, self).__init__()
         self.dunits = dunits
         self.dlayers = dlayers
+<<<<<<< HEAD
         #self.embed = torch.nn.Embedding(odim, dunits)
         #self.embed = torch.nn.Embedding(num_embeddings=odim+2, embedding_dim=dunits, padding_idx=odim+1)
         self.embed = torch.nn.Embedding(num_embeddings=50003, embedding_dim=dunits, padding_idx=50002)
+=======
 
         self.adaptation = adaptation
 
+        self.embed = torch.nn.Embedding(odim, dunits)
+>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
         self.decoder = torch.nn.ModuleList()
         if self.adaptation == 4:
             self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 200, dunits)]
@@ -1731,9 +1744,9 @@ class Decoder(torch.nn.Module):
         for l in six.moves.range(1, self.dlayers):
             self.decoder += [torch.nn.LSTMCell(dunits, dunits)]
         self.ignore_id = 0  # NOTE: 0 for CTC?
-#<<<<<<< HEAD
-#        self.output = torch.nn.Linear(dunits, 50003) # odim+2
-#=======
+<<<<<<< HEAD
+        self.output = torch.nn.Linear(dunits, 50003) # odim+2
+=======
 
         if self.adaptation ==5:
             # to a further dimensionality reduction of vis feats if 200 dim is too big
@@ -1742,7 +1755,7 @@ class Decoder(torch.nn.Module):
             self.output = torch.nn.Linear(dunits + 22, odim)
         else:
             self.output = torch.nn.Linear(dunits, odim)
-#>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
+>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
 
         self.loss = None
         self.att = att
@@ -1819,6 +1832,27 @@ class Decoder(torch.nn.Module):
         else:
             y_all = self.output(z_all)
 
+        # compute loss
+<<<<<<< HEAD
+        y_all = self.output(z_all)
+        #_, pred_idx = torch.max(y_all, -1)
+        #acc = th_accuracy_mt(pred_idx.view(pad_ys_out.shape).data, pad_ys_out.data)
+
+        # evaluation
+        '''
+        pred_reshaped = pred_idx.view(pad_ys_out.shape)
+        with open('../exp/pred.txt', 'w') as pred_file:
+             for sentence in pred_reshaped.data:
+                 prediction = [self.char_list[int(curr_idx)].encode('ascii', 'ignore')[:-1]  for curr_idx in sentence]
+                 pred_file.write(" ".join(prediction) + '\n')
+        with open('../exp/gt.txt', 'w') as gt_file:
+             for sentence in pad_ys_out.data:
+                  ground_truth = [self.char_list[int(curr_idx)].encode('ascii', 'ignore') for curr_idx in sentence]
+                  gt_file.write(" ".join(prediction) + '\n')
+        '''
+
+=======
+>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
         self.loss = F.cross_entropy(y_all, pad_ys_out.view(-1),
                                     ignore_index=self.ignore_id,
                                     size_average=True)

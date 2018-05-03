@@ -2,6 +2,7 @@
 
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
+# ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/voxforge --ngpu 1 --epochs 20 --batchsize 48 --target char --initchar false --vis_feat false --stage 1
 
 . ./path.sh
 . ./cmd.sh
@@ -12,7 +13,7 @@ stage=-1       # start from -1 if you need to start from data download
 gpu=            # will be deprecated, please use ngpu
 ngpu=0          # number of gpus ("0" uses cpu, otherwise use gpu)
 debugmode=1
-dumpdir=dump   # directory to dump full features
+dumpdir=   # directory to dump full features
 N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
 verbose=0      # verbose option
 resume=        # Resume the training from snapshot
@@ -78,11 +79,6 @@ if [ ! -z $gpu ]; then
     else
         ngpu=1
     fi
-fi
-
-# only for CLSP
-if [[ $(hostname -f) == *.clsp.jhu.edu ]] ; then
-    export CUDA_VISIBLE_DEVICES=$(/usr/local/bin/free-gpu -n $ngpu)
 fi
 
 # Set bash to 'debug' mode, it will exit on :

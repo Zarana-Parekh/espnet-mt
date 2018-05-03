@@ -381,37 +381,14 @@ def recog(args):
     #gt_file = open('/data/ASR5/zpp/espnet/egs/howto/exp/gt.txt', 'w')
 
     new_json = {}
+<<<<<<< HEAD
     for name, feat in reader.loader_dict.items():
         if args.beam_size == 1:
-            if args.adaptation in [6,7]:
-                topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
-            elif args.adaptation != 0:
-                obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
-                plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
-                vis_feat = np.append(obj_feat, plc_feat)
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
-            else:
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
-
+            y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
         else:
-	    if args.adaptation in [6,7]:
-                topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
-                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
-            elif args.adaptation != 0:
-                obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
-                plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
-                vis_feat = np.append(obj_feat, plc_feat)
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
-            else:
-                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
-
+            nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
             # get 1best and remove sos
             y_hat = nbest_hyps[0]['yseq'][1:]
-
-        if name not in recog_json.keys():
-            logging.warning('Skipping utt '+name+' as vis feat missing')
-            continue
 
         #y_true = map(int, recog_json[name]['tokenid'].split())
         y_true = map(int, recog_json[name]['tokens_pt'].encode('ascii', 'ignore').split())
@@ -456,3 +433,85 @@ def recog(args):
 
     #pred_file.close()
     #gt_file.close()
+=======
+    encoder_feats = {}
+    for name, feat in reader:
+        logging.warning('dumph valye : ' +str(args.dump_h))
+        args.dump_h=False
+        if args.dump_h:
+            enc_h = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+            encoder_feats[name]=enc_h.data.numpy()
+            logging.info("Done with "+name)
+        else:
+            if args.beam_size == 1:
+                if args.adaptation in [6,7]:
+                    topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
+                elif args.adaptation != 0:
+                    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+                    plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
+                    vis_feat = np.append(obj_feat, plc_feat)
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
+                else:
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+            else:
+	        if args.adaptation in [6,7]:
+                    topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
+                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
+                elif args.adaptation != 0:
+		    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+                    plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
+                    vis_feat = np.append(obj_feat, plc_feat)
+                    y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
+                else:
+                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+
+                # get 1best and remove sos
+                y_hat = nbest_hyps[0]['yseq'][1:]
+
+            if name not in recog_json.keys():
+                logging.warning('Skipping utt '+name+' as vis feat missing')
+                continue
+            y_true = map(int, recog_json[name]['tokenid'].split())
+
+            # print out decoding result
+            seq_hat = [train_args.char_list[int(idx)] for idx in y_hat]
+            seq_true = [train_args.char_list[int(idx)] for idx in y_true]
+            seq_hat_text = "".join(seq_hat).replace('<space>', ' ')
+            seq_true_text = "".join(seq_true).replace('<space>', ' ')
+            logging.info("groundtruth[%s]: " + seq_true_text, name)
+            logging.info("prediction [%s]: " + seq_hat_text, name)
+
+            # copy old json info
+            new_json[name] = recog_json[name]
+
+            # added recognition results to json
+            logging.debug("dump token id")
+            # TODO(karita) make consistent to chainer as idx[0] not idx
+            new_json[name]['rec_tokenid'] = " ".join([str(idx) for idx in y_hat])
+            logging.debug("dump token")
+            new_json[name]['rec_token'] = " ".join(seq_hat)
+            logging.debug("dump text")
+            new_json[name]['rec_text'] = seq_hat_text
+
+            # add n-best recognition results with scores
+            if args.beam_size > 1 and len(nbest_hyps) > 1:
+                for i, hyp in enumerate(nbest_hyps):
+                    y_hat = hyp['yseq'][1:]
+                    seq_hat = [train_args.char_list[int(idx)] for idx in y_hat]
+                    seq_hat_text = "".join(seq_hat).replace('<space>', ' ')
+                    new_json[name]['rec_tokenid' + '[' + '{:05d}'.format(i) + ']'] = " ".join([str(idx) for idx in y_hat])
+                    new_json[name]['rec_token' + '[' + '{:05d}'.format(i) + ']'] = " ".join(seq_hat)
+                    new_json[name]['rec_text' + '[' + '{:05d}'.format(i) + ']'] = seq_hat_text
+                    new_json[name]['score' + '[' + '{:05d}'.format(i) + ']'] = hyp['score']
+
+    if args.dump_h:
+        ark_file = args.save_ark
+        with open(ark_file,'wb') as f:
+            for key,mat in encoder_feats.iteritems():
+                kaldi_io_py.write_mat(f, mat, key=key)
+    else:
+        # TODO(watanabe) fix character coding problems when saving it
+        with open(args.result_label, 'wb') as f:
+            f.write(json.dumps({'utts': new_json}, indent=4, sort_keys=True).encode('utf_8'))
+>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452

@@ -4,11 +4,11 @@
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 # to run:
 : <<'END'
-initpath=exp/train_si284_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs48_mli800_mlo150_lsmunigram0.05/results/model.acc.best
+initpath=exp/480h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs40_mli800_mlo150_lsmunigram0.05_incomp/results/model.acc.best
 
 resumepath=exp/480h/train_adapt1_bpe_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_d1_unit300_location_mtlalpha0_adadelta_bs40_lsmunigram0.05/results/snapshot_iter_134955
 
-./run.av.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 1 --epochs 20 --batchsize 40 --atype location --target char --initchar false --vis_feat true --adaptation 1 --stage 2
+./run.topic.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 1 --epochs 20 --batchsize 48 --atype location --target word --initchar $inipath --vis_feat true --adaptation 6 --stage 4
 END
 
 . ./path.sh
@@ -92,7 +92,7 @@ dump_attn=false
 
 # visual feat related
 vis_feat=false
-obj_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/howto_480h_obj_1frame_100d.p
+obj_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/object_features.p
 plc_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/place_features.p
 topic_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/topic_features.p
 adaptation=0
@@ -133,7 +133,6 @@ set -o pipefail
 
 train_set=train
 train_dev=dev_test
-train_test=held_out_test
 recog_set="dev_test held_out_test"
 
 # Different target units
@@ -154,33 +153,30 @@ fi
 
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
-feat_te_dir=${dumpdir}/${train_test}/delta${do_delta}; mkdir -p ${feat_te_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    #for x in train dev_test dev5_test held_out_test; do
-    #    steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
-    #done
+    for x in train dev_test dev5_test held_out_test; do
+        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
+    done
 
     # compute global CMVN
-    #compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
+    compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
 
     # dump features for training
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
         ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
+    dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
         ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
-    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
-        ${datadir}/${train_test}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/te ${feat_te_dir}
 
-    #echo "cleaning transcripts"
-    # ../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
-    # ../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
-    # ../../../src/utils/clean_transcripts.py ${datadir}/held_out_test/text
-    exit 1;
+    echo "cleaning transcripts"
+     ../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
+     ../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
+     ../../../src/utils/clean_transcripts.py ${datadir}/held_out_test/text
+
 fi
 
 dict=${datadir}/lang_1char/${train_set}_${target}_units.txt
@@ -231,16 +227,12 @@ if [ ${stage} -le 2 ]; then
     data2json.sh --feat ${feat_tr_dir}/feats.scp \
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
         --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} --topic_feat_path ${topic_feat_path}\
-         ${datadir}/${train_set} ${dict} > ${feat_tr_dir}/data_vis_${target}.json
+         ${datadir}/${train_set} ${dict} > ${feat_tr_dir}/data_topic_${target}.json
     #data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
     data2json.sh --feat ${feat_dt_dir}/feats.scp \
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
         --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} --topic_feat_path ${topic_feat_path}\
-         ${datadir}/${train_dev} ${dict} > ${feat_dt_dir}/data_vis_${target}.json
-    data2json.sh --feat ${feat_te_dir}/feats.scp \
-        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
-        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} --topic_feat_path ${topic_feat_path}\
-         ${datadir}/${train_test} ${dict} > ${feat_te_dir}/data_vis_${target}.json
+         ${datadir}/${train_dev} ${dict} > ${feat_dt_dir}/data_topic_${target}.json
 fi
 
 # It takes a few days. If you just want to end-to-end ASR without LM,
@@ -307,7 +299,7 @@ else
 fi
 
 if [ -z ${tag} ]; then
-    expdir=${expdir_main}/${train_set}_adapt${adaptation}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
+    expdir=${expdir_main}/${train_set}_topic_adapt${adaptation}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
     #expdir=exp/90h/train_adapt1_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_d1_unit300_location_mtlalpha0_adadelta_bs40
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
@@ -337,8 +329,8 @@ if [ ${stage} -le 4 ]; then
         --seed ${seed} \
         --train-feat scp:${feat_tr_dir}/feats.scp \
         --valid-feat scp:${feat_dt_dir}/feats.scp \
-        --train-label ${feat_tr_dir}/data_vis_${target}.json \
-        --valid-label ${feat_dt_dir}/data_vis_${target}.json \
+        --train-label ${feat_tr_dir}/data_topic_${target}.json \
+        --valid-label ${feat_dt_dir}/data_topic_${target}.json \
         --etype ${etype} \
         --elayers ${elayers} \
         --eunits ${eunits} \
@@ -387,7 +379,7 @@ if [ ${stage} -le 5 ]; then
 
         # make json labels for recognition
         #data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
-        data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} ${data} ${dict} > ${data}/data_vis_${target}.json
+        data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} --topic_feat_path ${topic_feat_path} ${data} ${dict} > ${data}/data_topic_${target}.json
 
         #### use CPU for decoding
         ngpu=0
@@ -397,7 +389,7 @@ if [ ${stage} -le 5 ]; then
             --ngpu ${ngpu} \
             --backend ${backend} \
             --recog-feat "$feats" \
-            --recog-label ${data}/data_vis_${target}.json \
+            --recog-label ${data}/data_topic_${target}.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/model.${recog_model}  \
             --model-conf ${expdir}/results/model.conf  \

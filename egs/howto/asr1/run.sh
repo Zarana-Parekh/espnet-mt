@@ -11,6 +11,7 @@ initpath=exp/90h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchai
 ./run.sh --backend pytorch --etype blstm --subsample 1_1 --mtlalpha 0 --ctc_weight 0 --dumpdir  --datadir --expdir_main exp/90h --ngpu 1 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target bpe --nbpe 300 --initchar $initpath --vis_feat false --stage 4
 
 END
+
 . ./path.sh
 . ./cmd.sh
 
@@ -133,7 +134,8 @@ set -o pipefail
 
 train_set=train
 train_dev=dev_test
-recog_set="dev_test dev5_test"
+test_set=held_out_test
+recog_set="dev_test held_out_test"
 
 # Different target units
 echo $target
@@ -161,6 +163,7 @@ fi
 
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
+feat_te_dir=${dumpdir}/${test_set}/delta${do_delta}; mkdir -p ${feat_te_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
@@ -181,6 +184,27 @@ if [ ${stage} -le 1 ]; then
         ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
         ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+    #for x in train dev_test dev5_test; do # held_out_test; do
+    #    steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
+    #done
+
+    # compute global CMVN
+    #compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
+
+    # dump features for training
+    #dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
+    #    ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
+    dump.sh --cmd "$train_cmd" --nj 16 --do_delta $do_delta \
+        ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+    #dump.sh --cmd "$train_cmd" --nj 16 --do_delta $do_delta \
+    #    ${datadir}/${test_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/tes ${feat_te_dir}
+
+    #echo "cleaning transcripts"
+    #../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
+    #../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
+    #../../../src/utils/clean_transcripts.py ${datadir}/${test_set}/text
+    exit 1;
+
 fi
 
 dict=${datadir}/lang_1char/${train_set}_${target}_units.txt
@@ -199,25 +223,26 @@ if [ ${stage} -le 2 ]; then
 #    cat ${nlsyms}
 
     echo "make a dictionary"
-    echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
 
     if [ "${target}" == "char" ]; then
         echo "Character model"
-        #text2token.py -s 1 -n 1 -l ${nlsyms} ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-        #    | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+        echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
+        # keeping only those units that occur more than 50 times
         text2token.py -s 1 -n 1 ${datadir}/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-            | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+            | sort | uniq -c | awk '$1>=50{print $2}' | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
     elif [ "${target}" == "bpe" ]; then
         echo "BPE model"
+        echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
         echo "<space> 2" >> ${dict}
-        # learn bpe units
+        # learn bpe units, keeping only those units that occur more than 50 times
         cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s  ${nbpe} > ${code}
         cut -f 2- -d" " ${datadir}/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c  ${code} \
-            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+            | tr ' ' '\n' | sort | uniq -c | awk '$1>=50{print $2}' | awk '{print $0 " " NR+2}' >> ${dict}
     elif [ "${target}" == "word" ]; then
         echo "Word model"
-        cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
-            | awk '{print $0 " " NR+1}' >> ${dict}
+        #cut -f 2- -d" " ${datadir}/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        #    | awk '{print $0 " " NR+1}' >> ${dict}
+        ../../../src/utils/make_word_dict.py ${datadir}/${train_set}/text ${dict}
     else
         echo "Wrong target units specified, exiting."
         exit 1;
@@ -281,7 +306,7 @@ if [ ${stage} -le -999 ]; then
         lm_train.py \
         --ngpu ${lmngpu} \
         --backend ${backend} \
-        --verbose 1 &
+        --verbose 1 \
         --outdir ${lmexpdir} \
         --train-label ${lmdatadir}/train.txt \
         --valid-label ${lmdatadir}/valid.txt \
@@ -354,7 +379,7 @@ if [ ${stage} -le 4 ]; then
         --maxlen-out ${maxlen_out} \
         --opt ${opt} \
         --dropout-rate 0.3 \
-        --epochs ${epochs} #\
+        --epochs ${epochs} & #\
         #--initchar ${initchar}
 fi
 
@@ -362,8 +387,8 @@ if [ ${stage} -le 5 ]; then
     echo "stage 5: Decoding"
     nj=1
 
-    #for rtask in ${recog_set}; do
-    #(
+    for rtask in ${recog_set}; do
+    (
         decode_dir=decode_final_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
 
         # split data
@@ -382,7 +407,7 @@ if [ ${stage} -le 5 ]; then
         #data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} ${data} ${dict} > ${data}/data_${target}.json
 
         #### use CPU for decoding
-        #ngpu=0
+        ngpu=0
 
         ${decode_cmd} JOB=1:${nj} ${expdir}/${decode_dir}/log/decode.JOB.log \
             asr_recog.py \
@@ -398,9 +423,6 @@ if [ ${stage} -le 5 ]; then
             --maxlenratio ${maxlenratio} \
             --minlenratio ${minlenratio} \
             --ctc-weight ${ctc_weight} &
-#            --adaptation ${adaptation} &
-#            --rnnlm ${lmexpdir}/rnnlm.model.best \
-#            --lm-weight ${lm_weight} &
         wait
 
         if [ "${target}" == "bpe" ]; then
@@ -413,9 +435,12 @@ if [ ${stage} -le 5 ]; then
             score_sclite.sh --wer true ${expdir}/${decode_dir} ${dict}
         fi
 
-   # ) &
-    #done
+    ) &
+    done
     wait
     echo "Finished"
 fi
 
+#            --adaptation ${adaptation} &
+#            --rnnlm ${lmexpdir}/rnnlm.model.best \
+#            --lm-weight ${lm_weight} &

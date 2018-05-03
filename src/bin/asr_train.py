@@ -8,6 +8,7 @@ import argparse
 import logging
 import os
 import random
+import subprocess
 import sys
 
 import numpy as np
@@ -126,6 +127,17 @@ def main():
                         help='Number of maximum epochs')
     parser.add_argument('--grad-clip', default=5, type=float,
                         help='Gradient norm threshold to clip')
+    # initialize with another model
+    parser.add_argument('--initchar', default='false',
+                        help='Path of the model to initialize with')
+    # settings adaptation type
+    parser.add_argument('--adaptation', default=0, type=int,
+                        choices=[0,1,3,4,5,6,7,8],
+                        help='Specify type of attention to carry out')
+    parser.add_argument('--dump_h', default=False, type=bool,
+                         help='True if dumping hidden vectors h')
+    parser.add_argument('--dump_attn', default='false', type=str,
+                         help='True if dumping attention vectors')
     args = parser.parse_args()
 
     # logging info
@@ -147,6 +159,11 @@ def main():
 
     # check CUDA_VISIBLE_DEVICES
     if args.ngpu > 0:
+        if "clsp.jhu.edu" in subprocess.check_output(["hostname", "-f"]):
+            cvd = subprocess.check_output(["/usr/local/bin/free-gpu", "-n", str(args.ngpu)]).strip()
+            logging.info('CLSP: use gpu' + cvd)
+            os.environ['CUDA_VISIBLE_DEVICES'] = cvd
+
         cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
         if cvd is None:
             logging.warn("CUDA_VISIBLE_DEVICES is not set.")

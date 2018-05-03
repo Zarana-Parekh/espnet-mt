@@ -26,8 +26,6 @@ from ctc_prefix_score import CTCPrefixScore
 from e2e_asr_common import end_detect
 from e2e_asr_common import label_smoothing_dist
 
-from nltk.translate.bleu_score import sentence_bleu
-
 CTC_LOSS_THRESHOLD = 10000
 CTC_SCORING_RATIO = 1.5
 MAX_DECODER_OUTPUT = 5
@@ -116,6 +114,7 @@ class Loss(torch.nn.Module):
         :return:
         '''
         self.loss = None
+	# ADPT: Call to E2E.forward(data). Pass visual feats here
         loss_ctc, loss_att, acc = self.predictor(x)
         alpha = self.mtlalpha
         self.loss = alpha * loss_ctc + (1 - alpha) * loss_att
@@ -133,10 +132,8 @@ def pad_list(xs, pad_value=float("nan")):
     assert isinstance(xs[0], Variable)
     n_batch = len(xs)
     max_len = max(x.size(0) for x in xs)
-    #pad = Variable(xs[0].data.new(n_batch, max_len, *xs[0].size()[1:]).zero_() + 50001)
-    pad = Variable(xs[0].data.new(n_batch, max_len, *xs[0].size()[1:]).zero_() + 50002)
-
-    # removed pad_value
+    pad = Variable(xs[0].data.new(n_batch, max_len, *
+                                  xs[0].size()[1:]).zero_() + pad_value)
     for i in range(n_batch):
         pad[i, :xs[i].size(0)] = xs[i]
     return pad
@@ -155,13 +152,11 @@ class E2E(torch.nn.Module):
         self.verbose = args.verbose
         self.char_list = args.char_list
         self.outdir = args.outdir
-        self.adaptation = args.adaptation
-        self.dump_h = False
 
         # below means the last number becomes eos/sos ID
         # note that sos/eos IDs are identical
-        self.sos = 50001
-        self.eos = 50001
+        self.sos = odim - 1
+        self.eos = odim - 1
 
         # subsample info
         # +1 means input (+1) and layers outputs (args.elayer)
@@ -183,16 +178,9 @@ class E2E(torch.nn.Module):
         else:
             labeldist = None
 
-        if args.adaptation == 3:
-            idim = idim + 200
-
         # encoder
         self.enc = Encoder(args.etype, idim, args.elayers, args.eunits, args.eprojs,
                            self.subsample, args.dropout_rate)
-
-        #self.embed = torch.nn.Embedding(embedding_dim=idim, num_embeddings=50002, padding_idx=50001)
-        self.embed = torch.nn.Embedding(embedding_dim=idim, num_embeddings=50003, padding_idx=50002)
-
         # ctc
         self.ctc = CTC(odim, args.eprojs, args.dropout_rate)
         # attention
@@ -237,7 +225,7 @@ class E2E(torch.nn.Module):
         # decoder
         self.dec = Decoder(args.eprojs, odim, args.dlayers, args.dunits,
                            self.sos, self.eos, self.att, self.verbose, self.char_list,
-                           labeldist, args.lsm_weight, args.adaptation)
+                           labeldist, args.lsm_weight)
 
         # weight initialization
         self.init_like_chainer()
@@ -256,7 +244,7 @@ class E2E(torch.nn.Module):
 
         however, there are two exceptions as far as I know.
         - EmbedID.W ~ Normal(0, 1)
-        - LSTM.upward.b[forget_gate_range] = 1 (but not used in NStepLSTM)
+        - LSTM.upward.b[forget_gate_range] = 1 (but not used in NSetpLSTM)
         """
         lecun_normal_init_parameters(self)
 
@@ -276,138 +264,40 @@ class E2E(torch.nn.Module):
         :return:
         '''
         # utt list of frame x dim
-        xs = [np.array(map(int, d[1]['tokens_en'].split())) for d in data]
-
-        if self.adaptation in [6,7]:
-            # vis feat list of 1 x 100 each
-            vis_topic = [np.fromstring(d[1]['topic_feat'], dtype=np.float32, sep=' ') for d in data]
-        elif self.adaptation != 0:
-            # vis feat list of 1 x 100 each
-            vis_os = [np.fromstring(d[1]['obj_feat'], dtype=np.float32, sep=' ') for d in data]
-            vis_ps = [np.fromstring(d[1]['plc_feat'], dtype=np.float32, sep=' ') for d in data]
-        # remove 0-output-length utterances
-        tids = [map(int, d[1]['tokens_pt'].split()) for d in data]
+        xs = [d[1]['feat'] for d in data]
+        tids = [d[1]['tokenid'].split() for d in data]
         filtered_index = filter(lambda i: len(tids[i]) > 0, range(len(xs)))
         sorted_index = sorted(filtered_index, key=lambda i: -len(xs[i]))
         if len(sorted_index) != len(xs):
             logging.warning('Target sequences include empty tokenid (batch %d -> %d).' % (
                 len(xs), len(sorted_index)))
-        # re-order based on sorted_index
         xs = [xs[i] for i in sorted_index]
-
-        if self.adaptation in [6,7]:
-            # sort vis_topic vector
-            vis_topic = [vis_topic[i] for i in sorted_index]
-        elif self.adaptation != 0:
-            vis_os = [vis_os[i] for i in sorted_index]
-            vis_ps = [vis_ps[i] for i in sorted_index]
         # utt list of olen
         ys = [np.fromiter(map(int, tids[i]), dtype=np.int64)
               for i in sorted_index]
         ys = [to_cuda(self, Variable(torch.from_numpy(y))) for y in ys]
 
         # subsample frame
-        #xs = [xx[::self.subsample[0], :] for xx in xs]
+        xs = [xx[::self.subsample[0], :] for xx in xs]
         ilens = np.fromiter((xx.shape[0] for xx in xs), dtype=np.int64)
-        # convert input to Variables
         hs = [to_cuda(self, Variable(torch.from_numpy(xx))) for xx in xs]
 
-        if self.adaptation in [6,7]:
-            vis_topic_var = [to_cuda(self, Variable(torch.from_numpy(v_t))) for v_t in vis_topic]
-        elif self.adaptation != 0:
-            vis_os_var = [to_cuda(self, Variable(torch.from_numpy(v_o))) for v_o in vis_os]
-            vis_ps_var = [to_cuda(self, Variable(torch.from_numpy(v_p))) for v_p in vis_ps]
+        # 1. encoder
+	# ADPT: This hpad is the context vector
+	# ADPT: add visual features here before sending to decoder
+        xpad = pad_list(hs)
+        hpad, hlens = self.enc(xpad, ilens)
 
-        if self.adaptation == 0:
-            # no adaptation
-            # 1. encoder
-            xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
 
-            # # 3. CTC loss
-            loss_ctc = self.ctc(hpad, hlens, ys)
-            # 4. attention loss
-            loss_att, acc = self.dec(hpad, hlens, ys)
-        elif self.adaptation == 1:
-            # concatenating vis feats to hidden vector
-            # 1. encoder
-	    xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
-            #B*T*320
-            #logging.warning('original hpad size: ' + str(hpad.size()))
-            # saving to new Variable
-            hpad_vis_dummy = to_cuda(self, Variable(torch.zeros(hpad.size(0), (hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0)), hpad.size(2)), requires_grad=True))
-            hpad_vis = hpad_vis_dummy.clone() # need to clone as cannot use leaf Variable for in place changes
-            hlens_vis = [(hpad.size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0))]*hpad.size(0)
-            #logging.warning('init adapted hpad of size: '+str(hpad_vis.size()))
-            for b in range(len(xs)):
-                # append vis_os_var[b] 'dim' number of times
-                vis_os_var[b] = vis_os_var[b].unsqueeze(1).repeat(1, 1, hpad.size()[-1])
-                vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hpad.size()[-1])
-                hpad_vis[b] = torch.cat([hpad[b],vis_os_var[b][0],vis_ps_var[b][0]], dim=0)
-            #logging.warning('adapted hpad size: '+str(hpad_vis.size()))
-            # # 3. CTC loss
-            loss_ctc = self.ctc(hpad_vis, hlens_vis, ys)
-            # 4. attention loss
-            loss_att, acc = self.dec(hpad_vis, hlens_vis, ys)
-        elif self.adaptation in [4,5]:
-            # concatenating vis feats to context vector and output of decoder
-            # 1. encoder
-	    xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
-            # # 3. CTC loss
-            loss_ctc = self.ctc(hpad, hlens, ys)
-            # 4. Attention loss
-            # pass vis features to decoder, concatenating obj and plc features
-            vis_os_var = torch.stack(vis_os_var,dim=0)
-            vis_ps_var = torch.stack(vis_ps_var,dim=0)
-            vis_all_var = torch.cat([vis_os_var, vis_ps_var], dim=1)
-            #Visallvar -> 1x200
-            #hpad ->BxTx320
-            loss_att, acc = self.dec(hpad, hlens, ys, vis_all_var)
-        elif self.adaptation == 3:
-            # input concatenation
-            # 1. encoder
-            #logging.warning('unadapted hs : ' + str(hs[0].size()))
-            hs_vis = [to_cuda(self, Variable(torch.zeros(hs[b].size(0), (hs[b].size(1)+vis_os_var[0].size(0)+vis_ps_var[0].size(0))), requires_grad=True)) for b in range(len(hs))]
-            # append vis feats to input xs
-            for b in range(len(hs)):
-                # append vis_os_var[b] 'frame_num' number of times
-                vis_os_var[b] = vis_os_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
-                vis_ps_var[b] = vis_ps_var[b].unsqueeze(1).repeat(1, 1, hs[b].size(0))[0].transpose_(0,1)
-                hs_vis[b] = torch.cat([hs[b],vis_os_var[b],vis_ps_var[b]], dim=1)
-            #logging.warning('adapted hs_vis : ' + str(hs_vis[0].size()))
-            xpad = pad_list(hs_vis).long()
-	    xembed = self.embed(xpad)
+        # # 3. CTC loss
+        loss_ctc = self.ctc(hpad, hlens, ys)
 
-            # pass adapted input to encoder
-            # the Encoder.idim needs to be modified in this case
-            hpad, hlens = self.enc(xembed, ilens)
-            # # 3. CTC loss
-            loss_ctc = self.ctc(hpad, hlens, ys)
-            # 4. attention loss
-            loss_att, acc = self.dec(hpad, hlens, ys)
-        elif self.adaptation in [6,7]:
-            # append topic information in the decoder: to context vector and embed of previous input
-            # 1. encoder
-	    xpad = pad_list(hs).long()
-            xembed = self.embed(xpad)
-            hpad, hlens = self.enc(xembed, ilens)
-            # # 3. CTC loss
-            loss_ctc = self.ctc(hpad, hlens, ys)
-            # 4. Attention loss
-            # pass vis features to decoder, concatenating obj and plc features
-            vis_topic_var = torch.stack(vis_topic_var,dim=0)
-            loss_att, acc = self.dec(hpad, hlens, ys, vis_topic_var)
-        else:
-            logging.warning('Only implemented adaptation (0-7) so far')
+        # 4. attention loss
+        loss_att, acc = self.dec(hpad, hlens, ys)
 
         return loss_ctc, loss_att, acc
 
-    def recognize(self, x, recog_args, char_list, rnnlm=None, vis_feats=None):
+    def recognize(self, x, recog_args, char_list):
         '''E2E greedy/beam search
 
         :param x:
@@ -418,30 +308,23 @@ class E2E(torch.nn.Module):
         prev = self.training
         self.eval()
         # subsample frame
-        #x = x[::self.subsample[0], :]
-        x_int = np.array(map(int, x.encode('ascii', 'ignore').split()))
-        ilen = [x_int.shape[0]]
+        x = x[::self.subsample[0], :]
+        ilen = [x.shape[0]]
         h = to_cuda(self, Variable(torch.from_numpy(
-            np.array(x_int, dtype=np.float32)), volatile=True))
-
-        # read visual and topic features
-        # only topic adaptation
-        if self.adaptation in [6,7]:
-            vis_topic_var = to_cuda(self, Variable(torch.from_numpy(vis_feats)))
-            vis_topic_var = torch.stack(vis_topic_var, dim=1)
-        elif self.adaptation !=0:
-            vis_all_var = to_cuda(self, Variable(torch.from_numpy(vis_feats)))
-            vis_all_var = torch.stack(vis_all_var, dim=1)
+            np.array(x, dtype=np.float32)), volatile=True))
 
         # 1. encoder
         # make a utt list (1) to use the same interface for encoder
-        xembed = self.embed(h.unsqueeze(0).long())
-        #h, _ = self.enc(h.unsqueeze(0), ilen)
-        h, _ = self.enc(xembed, ilen)
-
-        if(self.dump_h):
-            return h
-
+        h, _ = self.enc(h.unsqueeze(0), ilen)
+	'''
+	# dumping hidden vector
+	import cPickle
+	import uuid
+	unique_filename = str(uuid.uuid4())
+	with open(r"word_h/"+unique_filename, "wb") as output_file:
+                    cPickle.dump(h, output_file)
+        logging.warn("dumped hidden vector")
+	'''
         # calculate log P(z_t|X) for CTC scores
         if recog_args.ctc_weight > 0.0:
             lpz = self.ctc.log_softmax(h).data[0]
@@ -451,19 +334,9 @@ class E2E(torch.nn.Module):
         # 2. decoder
         # decode the first utterance
         if recog_args.beam_size == 1:
-            if self.adaptation in [6,7]:
-                y = self.dec.recognize(h[0], recog_args, rnnlm, vis_topic_var)
-            elif self.adaptation != 0:
-                y = self.dec.recognize(h[0], recog_args, rnnlm, vis_all_var)
-            else:
-                y = self.dec.recognize(h[0], recog_args, rnnlm)
+            y = self.dec.recognize(h[0], recog_args)
         else:
-            if self.adaptation in [6,7]:
-                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_topic_var)
-            elif self.adaptation != 0:
-                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm, vis_all_var)
-            else:
-                y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list, rnnlm)
+            y = self.dec.recognize_beam(h[0], lpz, recog_args, char_list)
 
         if prev:
             self.train()
@@ -558,7 +431,7 @@ class CTC(torch.nn.Module):
         :param hs:
         :return:
         '''
-        return F.log_softmax(linear_tensor(self.ctc_lo, hpad), dim=2)
+        return F.log_softmax(linear_tensor(self.ctc_lo, hpad))
 
 
 def mask_by_length(xs, length, fill=0):
@@ -675,7 +548,7 @@ class AttDot(torch.nn.Module):
                       torch.tanh(self.mlp_dec(dec_z)).view(
                           batch, 1, self.att_dim),
                       dim=2)  # utt x frame
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
 
         # weighted sum over flames
         # utt x hdim
@@ -692,8 +565,8 @@ class AttAdd(torch.nn.Module):
     :param int att_dim: attention dimension
     '''
 
-    def __init__(self, eprojs, dunits, att_dim):
-        super(AttAdd, self).__init__()
+    def __init__(self, eprojs, dunits, att_dim, aconv_chans, aconv_filts):
+        super(AttLoc, self).__init__()
         self.mlp_enc = torch.nn.Linear(eprojs, att_dim)
         self.mlp_dec = torch.nn.Linear(dunits, att_dim, bias=False)
         self.gvec = torch.nn.Linear(att_dim, 1)
@@ -703,6 +576,7 @@ class AttAdd(torch.nn.Module):
         self.h_length = None
         self.enc_h = None
         self.pre_compute_enc_h = None
+        self.aconv_chans = aconv_chans
 
     def reset(self):
         '''reset states'''
@@ -745,7 +619,7 @@ class AttAdd(torch.nn.Module):
         # NOTE consider zero padding when compute w.
         e = linear_tensor(self.gvec, torch.tanh(
             self.pre_compute_enc_h + dec_z_tiled)).squeeze(2)
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
 
         # weighted sum over flames
         # utt x hdim
@@ -840,13 +714,12 @@ class AttLoc(torch.nn.Module):
         # NOTE consider zero padding when compute w.
         e = linear_tensor(self.gvec, torch.tanh(
             att_conv + self.pre_compute_enc_h + dec_z_tiled)).squeeze(2)
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
 
         # weighted sum over flames
         # utt x hdim
         # NOTE use bmm instead of sum(*)
         c = torch.sum(self.enc_h * w.view(batch, self.h_length, 1), dim=1)
-
         return c, w
 
 
@@ -929,7 +802,7 @@ class AttCov(torch.nn.Module):
         e = linear_tensor(self.gvec, torch.tanh(
             cov_vec + self.pre_compute_enc_h + dec_z_tiled)).squeeze(2)
 
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
         att_prev_list += [w]
 
         # weighted sum over flames
@@ -1029,7 +902,7 @@ class AttLoc2D(torch.nn.Module):
         e = linear_tensor(self.gvec, torch.tanh(
             att_conv + self.pre_compute_enc_h + dec_z_tiled)).squeeze(2)
 
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
 
         # weighted sum over flames
         # utt x hdim
@@ -1140,7 +1013,7 @@ class AttLocRec(torch.nn.Module):
         e = linear_tensor(self.gvec, torch.tanh(
             att_h.unsqueeze(1) + self.pre_compute_enc_h + dec_z_tiled)).squeeze(2)
 
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
 
         # weighted sum over flames
         # utt x hdim
@@ -1238,7 +1111,7 @@ class AttCovLoc(torch.nn.Module):
         e = linear_tensor(self.gvec, torch.tanh(
             att_conv + self.pre_compute_enc_h + dec_z_tiled)).squeeze(2)
 
-        w = F.softmax(scaling * e, dim=1)
+        w = F.softmax(scaling * e)
         att_prev_list += [w]
 
         # weighted sum over flames
@@ -1332,7 +1205,7 @@ class AttMultiHeadDot(torch.nn.Module):
                           torch.tanh(self.mlp_q[h](dec_z)).view(
                               batch, 1, self.att_dim_k),
                           dim=2)  # utt x frame
-            w += [F.softmax(self.scaling * e, dim=1)]
+            w += [F.softmax(self.scaling * e)]
 
             # weighted sum over flames
             # utt x hdim
@@ -1433,7 +1306,7 @@ class AttMultiHeadAdd(torch.nn.Module):
                 torch.tanh(
                     self.pre_compute_k[h] +
                     self.mlp_q[h](dec_z).view(batch, 1, self.att_dim_k))).squeeze(2)
-            w += [F.softmax(self.scaling * e, dim=1)]
+            w += [F.softmax(self.scaling * e)]
 
             # weighted sum over flames
             # utt x hdim
@@ -1554,7 +1427,7 @@ class AttMultiHeadLoc(torch.nn.Module):
                     self.pre_compute_k[h] +
                     att_conv +
                     self.mlp_q[h](dec_z).view(batch, 1, self.att_dim_k))).squeeze(2)
-            w += [F.softmax(scaling * e, dim=1)]
+            w += [F.softmax(scaling * e)]
 
             # weighted sum over flames
             # utt x hdim
@@ -1679,7 +1552,7 @@ class AttMultiHeadMultiResLoc(torch.nn.Module):
                     self.pre_compute_k[h] +
                     att_conv +
                     self.mlp_q[h](dec_z).view(batch, 1, self.att_dim_k))).squeeze(2)
-            w += [F.softmax(self.scaling * e, dim=1)]
+            w += [F.softmax(self.scaling * e)]
 
             # weighted sum over flames
             # utt x hdim
@@ -1693,7 +1566,6 @@ class AttMultiHeadMultiResLoc(torch.nn.Module):
 
 
 def th_accuracy(y_all, pad_target, ignore_label):
-    ignore_label = 50002
     pad_pred = y_all.data.view(pad_target.size(
         0), pad_target.size(1), y_all.size(1)).max(2)[1]
     mask = pad_target.data != ignore_label
@@ -1702,47 +1574,21 @@ def th_accuracy(y_all, pad_target, ignore_label):
     denominator = torch.sum(mask)
     return float(numerator) / float(denominator)
 
-def th_accuracy_mt(y_all, pad_target):
-     target = [str(x) for x in pad_target.cpu().numpy().tolist()]
-     y = [str(x) for x in y_all.cpu().numpy().tolist()]
-     return sentence_bleu(target, y, weights=(0.25, 0.25, 0.25, 0.25))
-
 
 # ------------- Decoder Network ----------------------------------------------------------------------------------------
 class Decoder(torch.nn.Module):
     def __init__(self, eprojs, odim, dlayers, dunits, sos, eos, att, verbose=0,
-                 char_list=None, labeldist=None, lsm_weight=0., adaptation=None):
+                 char_list=None, labeldist=None, lsm_weight=0.):
         super(Decoder, self).__init__()
         self.dunits = dunits
         self.dlayers = dlayers
-        #self.embed = torch.nn.Embedding(odim, dunits)
-        #self.embed = torch.nn.Embedding(num_embeddings=odim+2, embedding_dim=dunits, padding_idx=odim+1)
-        self.embed = torch.nn.Embedding(num_embeddings=50003, embedding_dim=dunits, padding_idx=50002)
-
-        self.adaptation = adaptation
-
+        self.embed = torch.nn.Embedding(odim, dunits)
         self.decoder = torch.nn.ModuleList()
-        if self.adaptation == 4:
-            self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 200, dunits)]
-        elif self.adaptation == 6:
-            self.decoder += [torch.nn.LSTMCell(dunits + eprojs + 22, dunits)]
-        else:
-            self.decoder += [torch.nn.LSTMCell(dunits + eprojs, dunits)]
+        self.decoder += [torch.nn.LSTMCell(dunits + eprojs, dunits)]
         for l in six.moves.range(1, self.dlayers):
             self.decoder += [torch.nn.LSTMCell(dunits, dunits)]
         self.ignore_id = 0  # NOTE: 0 for CTC?
-#<<<<<<< HEAD
-#        self.output = torch.nn.Linear(dunits, 50003) # odim+2
-#=======
-
-        if self.adaptation ==5:
-            # to a further dimensionality reduction of vis feats if 200 dim is too big
-            self.output = torch.nn.Linear(dunits + 200, odim)
-        elif self.adaptation == 7:
-            self.output = torch.nn.Linear(dunits + 22, odim)
-        else:
-            self.output = torch.nn.Linear(dunits, odim)
-#>>>>>>> ef3c4f1652f40652f1cae9c74139a0b8b7b21452
+        self.output = torch.nn.Linear(dunits, odim)
 
         self.loss = None
         self.att = att
@@ -1759,7 +1605,7 @@ class Decoder(torch.nn.Module):
     def zero_state(self, hpad):
         return Variable(hpad.data.new(hpad.size(0), self.dunits).zero_())
 
-    def forward(self, hpad, hlen, ys, vis_feats=None):
+    def forward(self, hpad, hlen, ys):
         '''Decoder forward
 
         :param hs:
@@ -1802,8 +1648,6 @@ class Decoder(torch.nn.Module):
         # loop for an output sequence
         for i in six.moves.range(olength):
             att_c, att_w = self.att(hpad, hlen, z_list[0], att_w)
-            if self.adaptation in [4,6]:
-                att_c = torch.cat([att_c, vis_feats], dim=1)
             ey = torch.cat((eys[:, i, :], att_c), dim=1)  # utt x (zdim + hdim)
             z_list[0], c_list[0] = self.decoder[0](ey, (z_list[0], c_list[0]))
             for l in six.moves.range(1, self.dlayers):
@@ -1812,13 +1656,8 @@ class Decoder(torch.nn.Module):
             z_all.append(z_list[-1])
 
         z_all = torch.stack(z_all, dim=1).view(batch * olength, self.dunits)
-        if self.adaptation in [5,7]:
-            vis_feats = vis_feats.repeat(1, olength, 1)[0]
-            z_all = torch.cat([z_all, vis_feats], dim=1)
-            y_all = self.output(z_all)
-        else:
-            y_all = self.output(z_all)
-
+        # compute loss
+        y_all = self.output(z_all)
         self.loss = F.cross_entropy(y_all, pad_ys_out.view(-1),
                                     ignore_index=self.ignore_id,
                                     size_average=True)
@@ -1846,14 +1685,14 @@ class Decoder(torch.nn.Module):
         if self.labeldist is not None:
             if self.vlabeldist is None:
                 self.vlabeldist = to_cuda(self, Variable(torch.from_numpy(self.labeldist)))
-            loss_reg = - torch.sum((F.log_softmax(y_all, dim=1) *
+            loss_reg = - torch.sum((F.log_softmax(y_all) *
                                     self.vlabeldist).view(-1), dim=0) / len(ys_in)
             self.loss = (1. - self.lsm_weight) * self.loss + self.lsm_weight * loss_reg
 
         return self.loss, acc
 
     # TODO(hori) incorporate CTC score
-    def recognize(self, h, recog_args, rnnlm=None, vis_feats=None):
+    def recognize(self, h, recog_args):
         '''greedy search implementation
 
         :param Variable h:
@@ -1867,8 +1706,6 @@ class Decoder(torch.nn.Module):
         for l in six.moves.range(1, self.dlayers):
             c_list.append(self.zero_state(h.unsqueeze(0)))
             z_list.append(self.zero_state(h.unsqueeze(0)))
-        if rnnlm:
-            state = None
         att_w = None
         y_seq = []
         self.att.reset()  # reset pre-computation of h
@@ -1891,14 +1728,7 @@ class Decoder(torch.nn.Module):
             for l in six.moves.range(1, self.dlayers):
                 z_list[l], c_list[l] = self.decoder[l](
                     z_list[l - 1], (z_list[l], c_list[l]))
-            if rnnlm:
-                y = Variable(h.data.new(1, 1).fill_(y), volatile=True)
-                state, z_rnnlm = rnnlm.predictor(state, y)
-                final_z = (1 - recog_args.lm_weight) * F.log_softmax(self.output(z_list[-1])) \
-                    + recog_args.lm_weight * F.log_softmax(z_rnnlm)
-            else:
-                final_z = F.log_softmax(self.output(z_list[-1]))
-            y = final_z.data.max(1)[1][0]
+            y = self.output(z_list[-1]).data.max(1)[1][0]
             y_seq.append(y)
 
             # terminate decoding
@@ -1907,7 +1737,7 @@ class Decoder(torch.nn.Module):
 
         return y_seq
 
-    def recognize_beam(self, h, lpz, recog_args, char_list, rnnlm=None, vis_feats=None):
+    def recognize_beam(self, h, lpz, recog_args, char_list):
         '''beam search implementation
 
         :param Variable h:
@@ -1937,17 +1767,13 @@ class Decoder(torch.nn.Module):
             maxlen = h.shape[0]
         else:
             # maxlen >= 1
-            maxlen = max(1, int(recog_args.maxlenratio * h.size(0)) + 20)
+            maxlen = max(1, int(recog_args.maxlenratio * h.size(0)))
         minlen = int(recog_args.minlenratio * h.size(0))
         logging.info('max output length: ' + str(maxlen))
         logging.info('min output length: ' + str(minlen))
 
         # initialize hypothesis
-        if rnnlm:
-            hyp = {'score': 0.0, 'yseq': [y], 'c_prev': c_list,
-                   'z_prev': z_list, 'a_prev': a, 'rnnlm_prev': None}
-        else:
-            hyp = {'score': 0.0, 'yseq': [y], 'c_prev': c_list, 'z_prev': z_list, 'a_prev': a}
+        hyp = {'score': 0.0, 'yseq': [y], 'c_prev': c_list, 'z_prev': z_list, 'a_prev': a}
         if lpz is not None:
             ctc_prefix_score = CTCPrefixScore(lpz.numpy(), 0, self.eos, np)
             hyp['ctc_state_prev'] = ctc_prefix_score.initial_state()
@@ -1956,9 +1782,10 @@ class Decoder(torch.nn.Module):
         hyps = [hyp]
         ended_hyps = []
 
+	# Dumping attention weights
         for i in six.moves.range(maxlen):
             logging.debug('position ' + str(i))
-
+	    n = 0
             hyps_best_kept = []
             for hyp in hyps:
                 vy.unsqueeze(1)
@@ -1966,43 +1793,31 @@ class Decoder(torch.nn.Module):
                 ey = self.embed(vy)           # utt list (1) x zdim
                 ey.unsqueeze(0)
                 att_c, att_w = self.att(h.unsqueeze(0), [h.size(0)], hyp['z_prev'][0], hyp['a_prev'])
-                if self.adaptation in [4,6]:
-                    att_c = torch.cat([att_c, vis_feats], dim=1)
+		
+		import cPickle
+		with open(r"dump_char2/"+str(i)+'_'+str(n), "wb") as output_file:
+            	    cPickle.dump(att_w, output_file)
+        	logging.warn("dumped attention vector")
+		
                 ey = torch.cat((ey, att_c), dim=1)   # utt(1) x (zdim + hdim)
                 z_list[0], c_list[0] = self.decoder[0](ey, (hyp['z_prev'][0], hyp['c_prev'][0]))
                 for l in six.moves.range(1, self.dlayers):
                     z_list[l], c_list[l] = self.decoder[l](
                         z_list[l - 1], (hyp['z_prev'][l], hyp['c_prev'][l]))
 
-                # append to output of decoder, adaptation 5,7
-                if self.adaptation in [5,7]:
-                    z_list_topic = torch.cat([z_list[-1], vis_feats], dim=1)
-                    # get nbest local scores and their ids
-                    local_att_scores = F.log_softmax(self.output(z_list_topic), dim=1).data
-                else:
-                    # get nbest local scores and their ids
-                    local_att_scores = F.log_softmax(self.output(z_list[-1]), dim=1).data
-                if rnnlm:
-                    rnnlm_state, z_rnnlm = rnnlm.predictor(hyp['rnnlm_prev'], vy)
-                    local_lm_scores = F.log_softmax(z_rnnlm, dim=1).data
-                    local_scores = local_att_scores + recog_args.lm_weight * local_lm_scores
-                else:
-                    local_scores = local_att_scores
-
+                # get nbest local scores and their ids
+                local_att_scores = F.log_softmax(self.output(z_list[-1])).data
                 if lpz is not None:
                     local_best_scores, local_best_ids = torch.topk(
                         local_att_scores, ctc_beam, dim=1)
-                    ctc_scores, ctc_states = ctc_prefix_score(
-                        hyp['yseq'], local_best_ids[0], hyp['ctc_state_prev'])
+                    ctc_scores, ctc_states = ctc_prefix_score(hyp['yseq'], local_best_ids[0], hyp['ctc_state_prev'])
                     local_scores = \
                         (1.0 - ctc_weight) * local_att_scores[:, local_best_ids[0]] \
                         + ctc_weight * torch.from_numpy(ctc_scores - hyp['ctc_score_prev'])
-                    if rnnlm:
-                        local_scores += recog_args.lm_weight * local_lm_scores[:, local_best_ids]
                     local_best_scores, joint_best_ids = torch.topk(local_scores, beam, dim=1)
                     local_best_ids = local_best_ids[:, joint_best_ids[0]]
                 else:
-                    local_best_scores, local_best_ids = torch.topk(local_scores, beam, dim=1)
+                    local_best_scores, local_best_ids = torch.topk(local_att_scores, beam, dim=1)
 
                 for j in six.moves.range(beam):
                     new_hyp = {}
@@ -2014,8 +1829,6 @@ class Decoder(torch.nn.Module):
                     new_hyp['yseq'] = [0] * (1 + len(hyp['yseq']))
                     new_hyp['yseq'][:len(hyp['yseq'])] = hyp['yseq']
                     new_hyp['yseq'][len(hyp['yseq'])] = local_best_ids[0, j]
-                    if rnnlm:
-                        new_hyp['rnnlm_prev'] = rnnlm_state
                     if lpz is not None:
                         new_hyp['ctc_state_prev'] = ctc_states[joint_best_ids[0, j]]
                         new_hyp['ctc_score_prev'] = ctc_scores[joint_best_ids[0, j]]
@@ -2024,12 +1837,14 @@ class Decoder(torch.nn.Module):
 
                 hyps_best_kept = sorted(
                     hyps_best_kept, key=lambda x: x['score'], reverse=True)[:beam]
+		
+		n += 1
 
             # sort and get nbest
             hyps = hyps_best_kept
             logging.debug('number of pruned hypothes: ' + str(len(hyps)))
-            #logging.debug(
-            #    'best hypo: ' + ''.join([char_list[int(x)] for x in hyps[0]['yseq'][1:]]))
+            logging.debug(
+                'best hypo: ' + ''.join([char_list[int(x)] for x in hyps[0]['yseq'][1:]]))
 
             # add eos in the final loop to avoid that there are no ended hyps
             if i == maxlen - 1:
@@ -2062,20 +1877,20 @@ class Decoder(torch.nn.Module):
                 logging.info('no hypothesis. Finish decoding.')
                 break
 
-            #for hyp in hyps:
-            #    logging.debug(
-            #        'hypo: ' + ''.join([char_list[int(x)] for x in hyp['yseq'][1:]]))
+            for hyp in hyps:
+                logging.debug(
+                    'hypo: ' + ''.join([char_list[int(x)] for x in hyp['yseq'][1:]]))
 
             logging.debug('number of ended hypothes: ' + str(len(ended_hyps)))
 
-        nbest_hyps = sorted(
-            ended_hyps, key=lambda x: x['score'], reverse=True)[:min(len(ended_hyps), recog_args.nbest)]
-        logging.info('total log probability: ' + str(nbest_hyps[0]['score']))
+        best_hyp = sorted(
+            ended_hyps, key=lambda x: x['score'], reverse=True)[0]
+        logging.info('total log probability: ' + str(best_hyp['score']))
         logging.info('normalized log probability: ' +
-                     str(nbest_hyps[0]['score'] / len(nbest_hyps[0]['yseq'])))
+                     str(best_hyp['score'] / len(best_hyp['yseq'])))
 
         # remove sos
-        return nbest_hyps
+        return best_hyp['yseq'][1:]
 
 
 # ------------- Encoder Network ----------------------------------------------------------------------------------------

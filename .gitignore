@@ -3,6 +3,41 @@
 \#*\#
 .\#*
 *DS_Store
+.*
+
+doc/_build
+
+# recipe related
+egs/*/*/data*
+egs/*/*/db
+egs/*/*/downloads
+egs/*/*/dump
+egs/*/*/exp
+egs/*/*/fbank
+egs/*/*/stft
+egs/*/*/enhan
+egs/*/*/tmp*
+
+# tools related
+src/utils/kaldi_io_py.py
+tools/*
+tools/kaldi
+tools/kaldi-io-for-python/
+tools/kaldi_github/
+tools/miniconda.sh
+tools/nkf/
+tools/venv/
+tools/warp-ctc/
+tools/chainer_ctc/
+tools/subword-nmt/
+
+.pytest_cache
+
+*~
+*.pyc
+\#*\#
+.\#*
+*DS_Store
 
 doc/_build
 

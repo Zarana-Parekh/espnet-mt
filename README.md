@@ -96,10 +96,14 @@ $ ./run.sh --ngpu 1
 # use multi-gpu
 $ ./run.sh --ngpu 3
 
+# if you want to specify gpus, set CUDA_VISIBLE_DEVICES as follows
+# (Note that if you use slurm, this specification is not needed)
+$ CUDA_VISIBLE_DEVICES=0,1,2 ./run.sh --ngpu 3
+
 # use cpu
 $ ./run.sh --ngpu 0
 ```
-Default setup uses CPU (`--ngpu 0`).  
+Default setup uses CPU (`--ngpu 0`).
 
 Note that if you want to use multi-gpu, the installation of [nccl](https://developer.nvidia.com/nccl) 
 is required before setup.
@@ -166,7 +170,7 @@ We list the character error rate (CER) and word error rate (WER) of major ASR ta
 |-----------|:----:|:----:|
 | Performance | ◎ | ○ |
 | Speed | ○ | ◎ |
-| Multi-GPU | supported | no support |
+| Multi-GPU | supported | supported |
 | VGG-like encoder | supported | no support |
 | RNNLM integration | supported | supported |
 | #Attention types | 3 (no attention, dot, location) | 12 including variants of multihead |

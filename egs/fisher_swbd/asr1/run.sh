@@ -3,6 +3,9 @@
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 
+# to run:
+# ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/fisher_data --datadir data --gpu 0 --epochs 25 --target char --batchsize 48 --stage 1
+
 . ./path.sh
 . ./cmd.sh
 
@@ -12,10 +15,12 @@ stage=0        # start from 0 if you need to start from data preparation
 gpu=            # will be deprecated, please use ngpu
 ngpu=0          # number of gpus ("0" uses cpu, otherwise use gpu)
 debugmode=1
-dumpdir=dump   # directory to dump full features
+dumpdir=       # directory to dump full features
+datadir=       # directory pointing to data
 N=0            # number of minibatches to be used (mainly for debugging). "0" uses all minibatches.
 verbose=0      # verbose option
 resume=        # Resume the training from snapshot
+seed=1
 
 # feature configuration
 do_delta=false # true when using CNN
@@ -40,6 +45,10 @@ aconv_filts=100
 # hybrid CTC/attention
 mtlalpha=0.5
 
+# label smoothing
+lsm_type=unigram
+lsm_weight=0.05
+
 # minibatch related
 batchsize=60
 maxlen_in=800  # if input length  > maxlen_in, batchsize is automatically reduced
@@ -60,11 +69,20 @@ minlenratio=0.0
 ctc_weight=0.3
 recog_model=acc.best # set a model to be used for decoding: 'acc.best' or 'loss.best'
 
+# target unit related
+nbpe=500
+initchar=false
+target=
+
+# dumping weights or attention
+dump_h=false
+dump_att=false
+
 # data
-fisher_dir="/export/corpora3/LDC/LDC2004T19 /export/corpora3/LDC/LDC2005T19 /export/corpora3/LDC/LDC2004S13 /export/corpora3/LDC/LDC2005S13"
-swbd1_dir=/export/corpora3/LDC/LDC97S62
-eval2000_dir="/export/corpora2/LDC/LDC2002S09/hub5e_00 /export/corpora2/LDC/LDC2002T43"
-rt03_dir=/export/corpora/LDC/LDC2007S10
+fisher_dir="/data/MM1/corpora/LDC2004T19 /data/MM1/corpora/LDC2005T19 /data/MM1/corpora/LDC2004S13 /data/MM1/corpora/LDC2005S13"
+swbd1_dir="/data/MM1/corpora/LDC97S62"
+eval2000_dir="/data/MM1/corpora/LDC2002S09/hub5e_00 /data/MM1/corpora/LDC2002T43"
+rt03_dir=/data/MM1/corpora/LDC2007S10
 
 # exp tag
 tag="" # tag for managing experiments.
@@ -85,21 +103,20 @@ if [ ! -z $gpu ]; then
     fi
 fi
 
-# only for CLSP
-if [[ $(hostname -f) == *.clsp.jhu.edu ]] ; then
-    export CUDA_VISIBLE_DEVICES=$(/usr/local/bin/free-gpu -n $ngpu)
-fi
-
 # Set bash to 'debug' mode, it will exit on :
 # -e 'error', -u 'undefined variable', -o ... 'error in pipeline', -x 'print commands',
 set -e
 set -u
 set -o pipefail
 
-train_set=train
-train_dev=rt03_trim
-recog_set="eval2000 rt03"
+# this train folder contains fisher+swbd data without repetitions
+train_set=train_all_nodup
+train_dev="train_dev"
+recog_set=eval2000 # rt03"
 
+# This code is not consistent for this data
+# We only process eval2000 using this, but copy train_all_nodup from ramons folder
+# Do not use this stage=0
 if [ ${stage} -le 0 ]; then
     ### Task dependent. You have to make data the following preparation part by yourself.
     ### But you can utilize Kaldi recipes in most cases
@@ -135,6 +152,21 @@ if [ ${stage} -le 0 ]; then
     done
 fi
 
+# Different target units
+if [ "${target}" == "char" ]; then
+    bpe_model=false
+    word_model=false
+elif [ "${target}" == "bpe" ]; then
+    bpe_model=true
+    word_model=false
+elif [ "${target}" == "word" ]; then
+    bpe_model=false
+    word_model=true
+else
+    echo "Wrong target units, exiting."
+    exit 1;
+fi
+
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
 if [ ${stage} -le 1 ]; then
@@ -143,38 +175,30 @@ if [ ${stage} -le 1 ]; then
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train_all ${recog_set}; do
+    for x in train_all_nodup ${recog_set}; do
         steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 32 data/${x} exp/make_fbank/${x} ${fbankdir}
     done
 
     # remove utt having more than 3000 frames or less than 10 frames or
     # remove utt having more than 400 characters or no more than 0 characters
-    remove_longshortdata.sh --maxframes 3000 --maxchars 400 data/train_all data/${train_set}
-    remove_longshortdata.sh --maxframes 3000 --maxchars 400 data/rt03 data/${train_dev}
+    remove_longshortdata.sh --maxframes 3000 --maxchars 400 data/train_all_nodup data/${train_set}
+    remove_longshortdata.sh --maxframes 3000 --maxchars 400 data/train_dev data/${train_dev}
 
     # compute global CMVN
     compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
 
     # dump features for training
-    split_dir=`echo $PWD | awk -F "/" '{print $(NF-1) "/" $NF}'`
-    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d ${feat_tr_dir}/storage ]; then
-    utils/create_split_dir.pl \
-        /export/b{10,11,12,13}/${USER}/espnet-data/egs/${split_dir}/dump/${train_set}/delta${do_delta}/storage \
-        ${feat_tr_dir}/storage
-    fi
-    if [[ $(hostname -f) == *.clsp.jhu.edu ]] && [ ! -d ${feat_dt_dir}/storage ]; then
-    utils/create_split_dir.pl \
-        /export/b{10,11,12,13}/${USER}/espnet-data/egs/${split_dir}/dump/${train_dev}/delta${do_delta}/storage \
-        ${feat_dt_dir}/storage
-    fi
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
         data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 10 --do_delta $do_delta \
         data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
 fi
 
-dict=data/lang_1char/${train_set}_units.txt
+dict=data/lang_1char/${train_set}_${target}_units.txt
 nlsyms=data/lang_1char/non_lang_syms.txt
+if [ "${target}" == "bpe" ]; then
+    code=data/lang_1char/bpe_code${nbpe}.txt
+fi
 
 echo "dictionary: ${dict}"
 if [ ${stage} -le 2 ]; then
@@ -188,19 +212,38 @@ if [ ${stage} -le 2 ]; then
 
     echo "make a dictionary"
     echo "<unk> 1" > ${dict} # <unk> must be 1, 0 will be used for "blank" in CTC
-    text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
-    | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+    if [ "${target}" == "char" ]; then
+        echo "Character model"
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_set}/text | cut -f 2- -d" " | tr " " "\n" \
+        | sort | uniq | grep -v -e '^\s*$' | awk '{print $0 " " NR+1}' >> ${dict}
+    elif [ "${target}" == "bpe" ]; then
+        echo "BPE model"
+        echo "<space> 2" >> ${dict}
+        # learn bpe units
+        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/learn_bpe.py -s ${nbpe} > ${code}
+        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} \
+            | tr ' ' '\n' | sort | uniq | awk '{print $0 " " NR+2}' >> ${dict}
+    elif [ "${target}" == "word" ]; then
+        echo "Word model"
+        cut -f 2- -d" " data/${train_set}/text | tr " " "\n" | sort | uniq -c | awk '$1>=5{print $2}'\
+        | awk '{print $0 " " NR+1}' >> ${dict}
+    else
+        echo "Wrong target unit specified, exiting."
+        exit 1;
+    fi
     wc -l ${dict}
 
     echo "make json files"
     data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \
-         data/${train_set} ${dict} > ${feat_tr_dir}/data.json
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
+         data/${train_set} ${dict} > ${feat_tr_dir}/data_${target}.json
     data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
-         data/${train_dev} ${dict} > ${feat_dt_dir}/data.json
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
+         data/${train_dev} ${dict} > ${feat_dt_dir}/data_${target}.json
 fi
 
 if [ -z ${tag} ]; then
-    expdir=exp/${train_set}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
     if ${do_delta}; then
         expdir=${expdir}_delta
     fi
@@ -209,17 +252,35 @@ else
 fi
 mkdir -p ${expdir}
 
-lmexpdir=exp/train_rnnlm_2layer_bs256
+lmexpdir=exp/train_${target}_rnnlm_2layer_bs256
 mkdir -p ${lmexpdir}
 if [ ${stage} -le 3 ]; then
     (
     echo "stage 3: LM Preparation"
-    lmdatadir=data/local/lm_train
+    lmdatadir=data/local/lm_train_${target}
     mkdir -p ${lmdatadir}
-    text2token.py -s 1 -n 1 -l ${nlsyms} data/train_all/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-        > ${lmdatadir}/train.txt
-    text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' \
-        > ${lmdatadir}/valid.txt
+    if [ "${target}" == "char" ]; then
+        echo "Character model"
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/train_all_nodup/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/train.txt
+        text2token.py -s 1 -n 1 -l ${nlsyms} data/${train_dev}/text | cut -f 2- -d" " | perl -pe 's/\n/ <eos> /g' > ${lmdatadir}/valid.txt
+    elif [ "${target}" == "bpe" ]; then
+        echo "BPE model"
+        cut -f 2- -d" " data/${train_set}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/train_trans.txt
+        cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
+        cut -f 2- -d" " data/${train_dev}/text | ../../../tools/subword-nmt/apply_bpe.py -c ${code} | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/valid.txt
+    elif [ "${target}" == "word" ]; then
+        echo "Word model"
+        cut -f 2- -d" " data/${train_set}/text | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/train_trans.txt
+        cat ${lmdatadir}/train_trans.txt | tr '\n' ' ' > ${lmdatadir}/train.txt
+        cut -f 2- -d" " data/${train_dev}/text | perl -pe 's/\n/ <eos> /g' \
+            > ${lmdatadir}/valid.txt
+    else
+        echo "Wrong target unit specified, exiting"
+        exit 1;
+    fi
     # use only 1 gpu
     if [ ${ngpu} -gt 1 ]; then
         echo "LM training does not support multi-gpu. signle gpu will be used."
@@ -256,8 +317,8 @@ if [ ${stage} -le 4 ]; then
         --resume ${resume} \
         --train-feat scp:${feat_tr_dir}/feats.scp \
         --valid-feat scp:${feat_dt_dir}/feats.scp \
-        --train-label ${feat_tr_dir}/data.json \
-        --valid-label ${feat_dt_dir}/data.json \
+        --train-label ${feat_tr_dir}/data_${target}.json \
+        --valid-label ${feat_dt_dir}/data_${target}.json \
         --etype ${etype} \
         --elayers ${elayers} \
         --eunits ${eunits} \
@@ -298,7 +359,7 @@ if [ ${stage} -le 5 ]; then
         fi
 
         # make json labels for recognition
-        data2json.sh --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data.json
+        data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
 
         #### use CPU for decoding
         ngpu=0
@@ -308,7 +369,7 @@ if [ ${stage} -le 5 ]; then
             --ngpu ${ngpu} \
             --backend ${backend} \
             --recog-feat "$feats" \
-            --recog-label ${data}/data.json \
+            --recog-label ${data}/data_${target}.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/model.${recog_model}  \
             --model-conf ${expdir}/results/model.conf  \
@@ -318,10 +379,16 @@ if [ ${stage} -le 5 ]; then
             --minlenratio ${minlenratio} \
             --ctc-weight ${ctc_weight} \
             --rnnlm ${lmexpdir}/rnnlm.model.best \
-            --lm-weight ${lm_weight} &
+            --lm-weight ${lm_weight} \
+            --dump_h ${dump_h} \
+            --dump_attn ${dump_attn} &
         wait
 
-        score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        if [ "$target" == "bpe" ]; then
+            score_sclite.sh --bpe true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        else
+            score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
+        fi
 
     ) &
     done

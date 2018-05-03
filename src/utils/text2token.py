@@ -33,6 +33,8 @@ def main():
                         help='list of non-linguistic symobles, e.g., <NOISE> etc.')
     parser.add_argument('text', type=str, default=False, nargs='?',
                         help='input text')
+    parser.add_argument('--wordmodel', '-w', default=False, type=str,
+                         help='True if building word models')
     args = parser.parse_args()
 
     rs = []
@@ -48,7 +50,9 @@ def main():
     line = f.readline()
     n = args.nchar
     while line:
+        # read line as a utf-8 string. Eg: line=asbdc, x=[u'asbdc']
         x = unicode(line, 'utf_8').split()
+        # convert list to string. Eg: a = 'asbdc'
         print ' '.join(x[:args.skip_ncols]).encode('utf_8'),
         a = ' '.join(x[args.skip_ncols:])
 
@@ -77,13 +81,20 @@ def main():
                     i += 1
             a = chars
 
-        a = [a[i:i + n] for i in range(0, len(a), n)]
+        a = [a[j:j + n] for j in range(0, len(a), n)]
 
         a_flat = []
         for z in a:
             a_flat.append("".join(z))
 
-        a_chars = [z.replace(' ', args.space) for z in a_flat]
+
+        if args.wordmodel:
+            print ' '.join(x[:args.skip_ncols]).encode('utf-8'),
+            a = ' '.join(x[args.skip_ncols:])
+            a_chars = [z.replace(' ', args.space) for z in a]
+        else:
+            a_chars = [z.replace(' ', args.space) for z in a_flat]
+
         print ' '.join(a_chars).encode('utf_8')
         line = f.readline()
 
