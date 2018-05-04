@@ -382,35 +382,25 @@ def recog(args):
             encoder_feats[name]=enc_h.data.numpy()
             logging.info("Done with "+name)
         else:
-            if args.beam_size == 1:
-                if args.adaptation in [6,7,8]:
-                    topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
-                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
-                elif args.adaptation != 0:
-                    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
-                    plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
-                    vis_feat = np.append(obj_feat, plc_feat)
-                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
-                else:
-                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+            if args.adaptation in [6,7,8]:
+                topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
+                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
+            elif args.adaptation != 0:
+                obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+                plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
+                vis_feat = np.append(obj_feat, plc_feat)
+                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
             else:
-                if args.adaptation in [6,7,8]:
-                    topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
-                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
-                elif args.adaptation != 0:
-                    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
-                    plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
-                    vis_feat = np.append(obj_feat, plc_feat)
-                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
-                else:
-                    nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
 
-                # get 1best and remove sos
-                y_hat = nbest_hyps[0]['yseq'][1:]
+            # get 1best and remove sos
+            y_hat = nbest_hyps[0]['yseq'][1:]
 
+            # required for missing vis feats
             if name not in recog_json.keys():
                 logging.warning('Skipping utt '+name+' as vis feat missing')
                 continue
+
             y_true = map(int, recog_json[name]['tokenid'].split())
 
             # print out decoding result
@@ -453,3 +443,5 @@ def recog(args):
         # TODO(watanabe) fix character coding problems when saving it
         with open(args.result_label, 'wb') as f:
             f.write(json.dumps({'utts': new_json}, indent=4, sort_keys=True).encode('utf_8'))
+
+
