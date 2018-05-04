@@ -8,10 +8,9 @@ initpath=exp/90h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchai
 ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 2 --epochs 20 --batchsize 38 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat false --stage 4
 
 ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data --datadir data/90h --expdir_main exp/90h --ngpu 1 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target bpe --nbpe 300 --initchar $initpath --vis_feat false --stage 4
-./run.sh --backend pytorch --etype blstm --subsample 1_1 --mtlalpha 0 --ctc_weight 0 --dumpdir  --datadir --expdir_main exp/90h --ngpu 1 --epochs 20 --batchsize 48 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target bpe --nbpe 300 --initchar $initpath --vis_feat false --stage 4
 
 END
-
+###### above commands not modified for adaptation
 . ./path.sh
 . ./cmd.sh
 
@@ -94,9 +93,12 @@ dump_attn=false
 
 # visual feat related
 vis_feat=false
+obj_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/howto_480h_obj_1frame_100d.p
+plc_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/place_features.p
+topic_feat_path=/data/ASR5/spalaska/pytorch-projects/espnet-avsr/egs/howto/asr1/data/visfeats/topic_features.p
 adaptation=0
-obj_feat_path=/data/ASR5/abhinav5/YTubeV2_480h/object_features.p
-plc_feat_path=/data/ASR5/abhinav5/PlacesAlexNet_480h/place_features.p
+#obj_feat_path=/data/ASR5/abhinav5/YTubeV2_480h/object_features.p
+#plc_feat_path=/data/ASR5/abhinav5/PlacesAlexNet_480h/place_features.p
 
 # data
 # ---- put path to wav and transcripts here if needed
@@ -134,7 +136,8 @@ set -o pipefail
 
 train_set=train
 train_dev=dev_test
-test_set=held_out_test
+#test_set=held_out_test
+train_test=held_out_test
 recog_set="dev_test held_out_test"
 
 # Different target units
@@ -163,7 +166,9 @@ fi
 
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
-feat_te_dir=${dumpdir}/${test_set}/delta${do_delta}; mkdir -p ${feat_te_dir}
+feat_te_dir=${dumpdir}/${train_test}/delta${do_delta}; mkdir -p ${feat_te_dir}
+###feat_te_dir=${dumpdir}/${train_test}/delta${do_delta}i; mkdir -p ${feat_te_dir}
+
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
@@ -172,18 +177,28 @@ if [ ${stage} -le 1 ]; then
 
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train dev_test dev5_test; do # held_out_test; do
-        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
-    done
+    #for x in train dev_test dev5_test; do # held_out_test; do
+    #    steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
+    #done
 
     # compute global CMVN
-    compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
+    #compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
 
     # dump features for training
+    ### old code processing, replaced to incorporate adaptation
+    #dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
+    #    ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
+    #dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
+    #    ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
         ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
         ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
+        ${datadir}/${train_test}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/te ${feat_te_dir}
+
+
     #for x in train dev_test dev5_test; do # held_out_test; do
     #    steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
     #done
@@ -194,8 +209,8 @@ if [ ${stage} -le 1 ]; then
     # dump features for training
     #dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
     #    ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 16 --do_delta $do_delta \
-        ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+    #dump.sh --cmd "$train_cmd" --nj 16 --do_delta $do_delta \
+    #    ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
     #dump.sh --cmd "$train_cmd" --nj 16 --do_delta $do_delta \
     #    ${datadir}/${test_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/tes ${feat_te_dir}
 
@@ -325,7 +340,9 @@ else
 fi
 
 if [ -z ${tag} ]; then
+    ### modified for incorporating adaptation
     expdir=${expdir_main}/${train_set}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_ctc${ctctype}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_mli${maxlen_in}_mlo${maxlen_out}
+    #expdir=${expdir_main}/${train_set}_adapt${adaptation}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi
@@ -347,16 +364,16 @@ if [ ${stage} -le 4 ]; then
         --backend ${backend} \
         --outdir ${expdir}/results \
         --debugmode ${debugmode} \
-        --dict /tmp/zpp/data/mapping/word_idx_pt.txt \
+        --dict /tmp/zpp/new_split/mapping/word_idx_pt.txt \
         --debugdir ${expdir} \
         --minibatches ${N} \
         --verbose ${verbose} \
         --resume ${resume} \
         --seed ${seed} \
-        --train-feat  /tmp/zpp/data/train.json \
-        --valid-feat /tmp/zpp/data/val.json \
-        --train-label /tmp/zpp/data/train.json \
-        --valid-label /tmp/zpp/data/val.json \
+        --train-feat  /tmp/zpp/new_split/train.json \
+        --valid-feat /tmp/zpp/new_split/val.json \
+        --train-label /tmp/zpp/new_split/train.json \
+        --valid-label /tmp/zpp/new_split/val.json \
         --etype ${etype} \
         --elayers ${elayers} \
         --eunits ${eunits} \
@@ -379,8 +396,8 @@ if [ ${stage} -le 4 ]; then
         --maxlen-out ${maxlen_out} \
         --opt ${opt} \
         --dropout-rate 0.3 \
-        --epochs ${epochs} & #\
-        #--initchar ${initchar}
+        --epochs ${epochs} \
+ 	--adaptation ${adaptation}
 fi
 
 if [ ${stage} -le 5 ]; then
@@ -389,8 +406,10 @@ if [ ${stage} -le 5 ]; then
 
     for rtask in ${recog_set}; do
     (
+        # modified for incorporating adaptation
+        #decode_dir=decode_final_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
         decode_dir=decode_final_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
-
+        
         # split data
         #data=${datadir}/${rtask}
         #split_data.sh --per-utt ${data} ${nj};
@@ -403,8 +422,8 @@ if [ ${stage} -le 5 ]; then
         #fi
 
         # make json labels for recognition
-        #data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --nlsyms ${nlsyms} ${data} ${dict} > ${data}/data_${target}.json
-        #data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} ${data} ${dict} > ${data}/data_${target}.json
+        #data2json.sh --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} ${data} ${dict} > ${data}/data_vis_${target}.json
+
 
         #### use CPU for decoding
         ngpu=0
@@ -413,8 +432,8 @@ if [ ${stage} -le 5 ]; then
             asr_recog.py \
             --ngpu ${ngpu} \
             --backend ${backend} \
-            --recog-feat /tmp/zpp/data/new_test.json \
-            --recog-label /tmp/zpp/data/new_test.json \
+            --recog-feat /tmp/zpp/new_split/small_test.json \
+            --recog-label /tmp/zpp/new_split/small_test.json \
             --result-label ${expdir}/${decode_dir}/data.JOB.json \
             --model ${expdir}/results/model.${recog_model}  \
             --model-conf ${expdir}/results/model.conf  \
@@ -422,7 +441,8 @@ if [ ${stage} -le 5 ]; then
             --penalty ${penalty} \
             --maxlenratio ${maxlenratio} \
             --minlenratio ${minlenratio} \
-            --ctc-weight ${ctc_weight} &
+            --adaptation ${adaptation} \
+            --ctc-weight ${ctc_weight} 
         wait
 
         if [ "${target}" == "bpe" ]; then

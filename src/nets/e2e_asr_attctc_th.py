@@ -405,6 +405,15 @@ class E2E(torch.nn.Module):
         else:
             logging.warning('Only implemented adaptation (0-7) so far')
 
+        del ys
+        del hs
+        del sorted_index
+        del ilens
+        del xpad
+        del xembed
+        del hlens
+        del hpad
+
         return loss_ctc, loss_att, acc
 
     def recognize(self, x, recog_args, char_list, rnnlm=None, vis_feats=None):
@@ -1934,7 +1943,7 @@ class Decoder(torch.nn.Module):
         y = self.sos
         vy = Variable(h.data.new(1).zero_().long(), volatile=True)
         if recog_args.maxlenratio == 0:
-            maxlen = h.shape[0]
+            maxlen = h.shape[0] + 20
         else:
             # maxlen >= 1
             maxlen = max(1, int(recog_args.maxlenratio * h.size(0)) + 20)

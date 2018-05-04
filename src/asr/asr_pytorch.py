@@ -164,7 +164,7 @@ def train(args):
     idim = int(valid_json[utts[0]]['idim'])
     odim = int(valid_json[utts[0]]['odim'])
     idim = 300
-    odim = 50001
+    odim = 50003
 
     # specify model architecture
     e2e = E2E(idim, odim, args)
@@ -417,8 +417,8 @@ def recog(args):
         y_true = map(int, recog_json[name]['tokens_pt'].encode('ascii', 'ignore').split())
 
         # print out decoding result
-        seq_hat = [train_args.char_list[int(idx)] for idx in y_hat if train_args.char_list[int(idx)] != '<eos>']
-        seq_true = [train_args.char_list[int(idx)] for idx in y_true if train_args.char_list[int(idx)] != '<eos>']
+        seq_hat = [train_args.char_list[int(idx)] for idx in y_hat if int(idx) < len(train_args.char_list) and train_args.char_list[int(idx)] != '<eos>']
+        seq_true = [train_args.char_list[int(idx)] for idx in y_true if int(idx) < len(train_args.char_list) and train_args.char_list[int(idx)] != '<eos>']
         seq_hat_text = " ".join(seq_hat).replace('<space>', ' ')
         seq_true_text = " ".join(seq_true).replace('<space>', ' ')
         logging.info("groundtruth[%s]: " + seq_true_text, name)

@@ -39,7 +39,7 @@ class MTLazyDict(ScpLazyDict):
     def __init__(self, loader_dict):
         self.loader_dict = loader_dict
 
-   def __getitem__(self, item):
+    def __getitem__(self, item):
         return self.loader_dict[item.decode('utf-8')]
 
 def read_dict_scp(file_or_fd):
