@@ -3,6 +3,7 @@
 # Copyright 2017 Johns Hopkins University (Shinji Watanabe)
 #  Apache 2.0  (http://www.apache.org/licenses/LICENSE-2.0)
 # to run:
+##### /data/ASR5/sreyashn/data/how-to-data/ramon_splits/splits
 : <<'END'
 initpath=exp/90h/train_char_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs44_mli800_mlo150_lsmunigram0.05/results/model.acc.best
 ./run.sh --backend pytorch --etype blstmp --mtlalpha 0 --ctc_weight 0 --dumpdir /tmp/spalaska/howto_data_480h --datadir data/480h --expdir_main exp/480h --ngpu 2 --epochs 20 --batchsize 38 --lm_weight 0.3 --bplen 35 --lm_epoch 50 --target char --initchar false --vis_feat false --stage 4
