@@ -24,9 +24,9 @@
 
 # to run:
 : <<'END'
-expath=exp/480h/train_word_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs40_mli800_mlo150_lsmunigram0.05_alldat
+expath=
 
-./decode.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target word --datadir data/480h --dumpdir /tmp/spalaska/howto_data_480h --dump_h False --recog_set dev_test
+./decode.av.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target char --datadir data/480h --dumpdir /tmp/spalaska/howto_data_480h --vis_feat true --adaptation 1 --recog_set held_out_test
 END
  . ./path.sh
  . ./cmd.sh
@@ -58,11 +58,11 @@ END
  recog_model=acc.best
 
  target=char
+ vis_feat=false
  adaptation=0
  dump_h=False
+ nbpe=300
 
- #recog_set="dev_test held_out_test"
- #recog_set="dev_test"
  recog_set=held_out_test
 
  . utils/parse_options.sh || exit 1;
@@ -77,7 +77,11 @@ END
 
  uname -n
  echo "expdir: ${expdir}"
- dict=${datadir}/lang_1char/train_${target}_units.txt
+ if [ "${target}" == "bpe" ]; then
+     dict=${datadir}/lang_1char/train_${target}${nbpe}_units.txt
+ else
+    dict=${datadir}/lang_1char/train_${target}_units.txt
+ fi
  echo "dictionary: ${dict}"
 
  modeldir=${expdir}/results/model.${recog_model}
@@ -86,13 +90,11 @@ END
  echo "modeldir: ${modeldir}"
  echo "modelconfdir: ${modelconfdir}"
 
- echo "dump_h: ${dump_h}"
-
- echo "Recog set: ${recog_set}"
+ echo "recogset: ${recog_set}"
 
 if [ ${stage} -le 5 ]; then
      echo "stage 5: Decoding"
-     nj=32
+     nj=8
 
      for rtask in ${recog_set}; do
      (
@@ -114,7 +116,7 @@ if [ ${stage} -le 5 ]; then
 			 --verbose ${verbose} \
              --backend ${backend} \
              --recog-feat "$feats" \
-             --recog-label ${dumpdir}/${rtask}/delta${do_delta}/data_${target}.json \
+             --recog-label ${dumpdir}/${rtask}/delta${do_delta}/data_vis_${target}.json \
              --result-label ${expdir}/${decode_dir}/data.JOB.json \
              --model ${modeldir}  \
              --model-conf ${modelconfdir}  \

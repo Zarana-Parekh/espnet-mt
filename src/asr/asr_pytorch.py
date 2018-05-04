@@ -217,7 +217,7 @@ def train(args):
         gpu_id = [-1]
 
     # Setup an optimizer
-    if args.opt == 'a8dadelta':
+    if args.opt == 'adadelta':
         optimizer = torch.optim.Adadelta(
             model.parameters(), rho=0.95, eps=args.eps)
     elif args.opt == 'adam':
@@ -383,7 +383,7 @@ def recog(args):
             logging.info("Done with "+name)
         else:
             if args.beam_size == 1:
-                if args.adaptation in [6,7]:
+                if args.adaptation in [6,7,8]:
                     topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
                     y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
                 elif args.adaptation != 0:
@@ -394,11 +394,11 @@ def recog(args):
                 else:
                     y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
             else:
-	        if args.adaptation in [6,7]:
+                if args.adaptation in [6,7,8]:
                     topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
                     nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
                 elif args.adaptation != 0:
-		    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+                    obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
                     plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
                     vis_feat = np.append(obj_feat, plc_feat)
                     y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)

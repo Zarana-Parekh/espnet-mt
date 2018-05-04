@@ -134,6 +134,7 @@ set -o pipefail
 train_set=train
 train_dev=dev_test
 recog_set="dev_test held_out_test"
+train_test=held_out_test
 
 # Different target units
 if [ "${target}" == "char" ]; then
@@ -153,29 +154,34 @@ fi
 
 feat_tr_dir=${dumpdir}/${train_set}/delta${do_delta}; mkdir -p ${feat_tr_dir}
 feat_dt_dir=${dumpdir}/${train_dev}/delta${do_delta}; mkdir -p ${feat_dt_dir}
+feat_te_dir=${dumpdir}/${train_test}/delta${do_delta}; mkdir -p ${feat_te_dir}
 if [ ${stage} -le 1 ]; then
     ### Task dependent. You have to design training and dev sets by yourself.
     ### But you can utilize Kaldi recipes in most cases
     echo "stage 1: Feature Generation"
     fbankdir=fbank
     # Generate the fbank features; by default 80-dimensional fbanks with pitch on each frame
-    for x in train dev_test dev5_test held_out_test; do
-        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
-    done
+#    for x in train dev_test dev5_test held_out_test; do
+#        steps/make_fbank_pitch.sh --cmd "$train_cmd" --nj 16 ${datadir}/${x} ${expdir_main}/make_fbank/${x} ${fbankdir}
+#    done
 
     # compute global CMVN
-    compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
+#    compute-cmvn-stats scp:${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark
 
     # dump features for training
+#    dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
+#        ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
-        ${datadir}/${train_set}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 4 --do_delta $do_delta \
         ${datadir}/${train_dev}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/dev ${feat_dt_dir}
+    dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
+        ${datadir}/${train_test}/feats.scp ${datadir}/${train_set}/cmvn.ark ${expdir_main}/dump_feats/te ${feat_te_dir}
 
-    echo "cleaning transcripts"
-     ../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
-     ../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
-     ../../../src/utils/clean_transcripts.py ${datadir}/held_out_test/text
+#    echo "cleaning transcripts"
+#     ../../../src/utils/clean_transcripts.py ${datadir}/${train_set}/text
+#     ../../../src/utils/clean_transcripts.py ${datadir}/${train_dev}/text
+#     ../../../src/utils/clean_transcripts.py ${datadir}/held_out_test/text
+
+exit 1;
 
 fi
 

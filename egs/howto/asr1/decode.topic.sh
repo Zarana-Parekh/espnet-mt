@@ -24,9 +24,9 @@
 
 # to run:
 : <<'END'
-expath=exp/480h/train_topic_adapt7_word_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_d1_unit300_location_mtlalpha0_adadelta_bs48_lsmunigram0.05
+expath=
 
-./decode.topic.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target word --datadir data/480h --dumpdir /tmp/spalaska/howto_data_480h --vis_feat true --adaptation 7
+./decode.topic.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target word --datadir data/480h --dumpdir /tmp/spalaska/howto_data_480h --vis_feat true --adaptation 7 --recog_set held_out_test
 END
  . ./path.sh
  . ./cmd.sh
@@ -65,7 +65,7 @@ END
 
  recog_set="dev_test held_out_test"
 # recog_set="dev_test"
- recog_set="held_out_test"
+ recog_set=held_out_test
 
  . utils/parse_options.sh || exit 1;
  . ./path.sh
@@ -94,11 +94,11 @@ END
 
 if [ ${stage} -le 5 ]; then
      echo "stage 5: Decoding"
-     nj=8
+     nj=32
 
      for rtask in ${recog_set}; do
      (
-         decode_dir=decode_${rtask}_beam${beam_size}_p${penalty}_len${minlenratio}-${maxlenratio}
+         decode_dir=decode_${rtask}_beam${beam_size}_p${penalty}_len${minlenratio}-${maxlenratio}_nj${nj}
 
          # feature extraction
 		 feats="ark,s,cs:copy-feats scp:$dumpdir/$rtask/delta${do_delta}/feats.JOB.scp ark:- |"

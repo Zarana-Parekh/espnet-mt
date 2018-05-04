@@ -236,6 +236,11 @@ if [ ${stage} -le 2 ]; then
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
         --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
          ${datadir}/${train_dev} ${dict} > ${feat_dt_dir}/data_${target}.json
+    data2json.sh --feat ${feat_te_dir}/feats.scp \
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
+        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
+         ${datadir}/${train_test} ${dict} > ${feat_te_dir}/data_${target}.json
+    exit 1;
 fi
 
 # It takes a few days. If you just want to end-to-end ASR without LM,
@@ -357,7 +362,7 @@ if [ ${stage} -le 4 ]; then
         --initchar ${initchar}
 fi
 
-if [ ${stage} -le 9998 ]; then
+if [ ${stage} -le -9998 ]; then
     echo "stage 5: Decoding"
     nj=32
 
