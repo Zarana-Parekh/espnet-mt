@@ -222,7 +222,7 @@ def train(args):
         gpu_id = [-1]
 
     # Setup an optimizer
-    if args.opt == 'a8dadelta':
+    if args.opt == 'adadelta':
         optimizer = torch.optim.Adadelta(
             model.parameters(), rho=0.95, eps=args.eps)
     elif args.opt == 'adam':
@@ -252,6 +252,8 @@ def train(args):
     # prepare Kaldi reader
     train_reader = lazy_io.read_dict_mt(args.train_feat, 'tokens_en') #lazy_io.read_dict_scp(args.train_feat)
     valid_reader = lazy_io.read_dict_mt(args.valid_feat, 'tokens_en') #lazy_io.read_dict_scp(args.valid_feat)
+    #train_reader = lazy_io.read_dict_mt(args.train_feat, 'tokens_pt')
+    #valid_reader = lazy_io.read_dict_mt(args.valid_feat, 'tokens_pt')
 
     # Set up a trainer
     updater = PytorchSeqUpdaterKaldi(
@@ -371,6 +373,7 @@ def recog(args):
     # prepare Kaldi reader
     #reader = kaldi_io_py.read_mat_ark(args.recog_feat)
     reader = lazy_io.read_dict_mt(args.recog_feat, 'tokens_en')
+    #reader = lazy_io.read_dict_mt(args.recog_feat, 'tokens_pt')
     logging.info("Done reading")
 
     # read json data
@@ -382,32 +385,19 @@ def recog(args):
 
     new_json = {}
     for name, feat in reader.loader_dict.items():
-        if args.beam_size == 1:
-            if args.adaptation in [6,7]:
-                topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
-            elif args.adaptation != 0:
-                obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
-                plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
-                vis_feat = np.append(obj_feat, plc_feat)
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
-            else:
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
-
+        if args.adaptation in [6,7,8]:
+            topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
+            nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
+        elif args.adaptation != 0:
+            obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
+            plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
+            vis_feat = np.append(obj_feat, plc_feat)
+            nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
         else:
-	    if args.adaptation in [6,7]:
-                topic_feat = np.fromstring(recog_json[name]['topic_feat'], dtype=np.float32, sep=' ')
-                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=topic_feat)
-            elif args.adaptation != 0:
-                obj_feat = np.fromstring(recog_json[name]['obj_feat'], dtype=np.float32, sep=' ')
-                plc_feat = np.fromstring(recog_json[name]['plc_feat'], dtype=np.float32, sep=' ')
-                vis_feat = np.append(obj_feat, plc_feat)
-                y_hat = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm, vis_feats=vis_feat)
-            else:
-                nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
+            nbest_hyps = e2e.recognize(feat, args, train_args.char_list, rnnlm=rnnlm)
 
-            # get 1best and remove sos
-            y_hat = nbest_hyps[0]['yseq'][1:]
+         # get 1best and remove sos
+        y_hat = nbest_hyps[0]['yseq'][1:]
 
         if name not in recog_json.keys():
             logging.warning('Skipping utt '+name+' as vis feat missing')
@@ -415,6 +405,7 @@ def recog(args):
 
         #y_true = map(int, recog_json[name]['tokenid'].split())
         y_true = map(int, recog_json[name]['tokens_pt'].encode('ascii', 'ignore').split())
+        #y_true = map(int, recog_json[name]['tokens_en'].encode('ascii', 'ignore').split())
 
         # print out decoding result
         seq_hat = [train_args.char_list[int(idx)] for idx in y_hat if int(idx) < len(train_args.char_list) and train_args.char_list[int(idx)] != '<eos>']

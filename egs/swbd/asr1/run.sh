@@ -189,11 +189,11 @@ if [ ${stage} -le 1 ]; then
     #compute-cmvn-stats scp:data/${train_set}/feats.scp data/${train_set}/cmvn.ark
 
     # dump features for training
+    #dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
+    #    data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
     dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
-        data/${train_set}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/train ${feat_tr_dir}
-    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
         data/${train_dev}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/dev ${feat_dt_dir}
-    dump.sh --cmd "$train_cmd" --nj 8 --do_delta $do_delta \
+    dump.sh --cmd "$train_cmd" --nj 32 --do_delta $do_delta \
         data/${train_test}/feats.scp data/${train_set}/cmvn.ark exp/dump_feats/te ${feat_te_dir}
     exit 1;
 fi
@@ -238,7 +238,7 @@ if [ ${stage} -le 2 ]; then
     wc -l ${dict}
 
     echo "make json files"
-    data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \
+    data2json.sh --feat ${feat_tr_dir}/feats.scp --nlsyms ${nlsyms} \::
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} \
          data/${train_set} ${dict} > ${feat_tr_dir}/data_${target}.json
     data2json.sh --feat ${feat_dt_dir}/feats.scp --nlsyms ${nlsyms} \
@@ -299,8 +299,14 @@ if [ ${stage} -le -999 ]; then
     echo "LM training finished, exiting"
 fi
 
+if [ "${target}" == "bpe" ]; then
+     targetname=${target}${nbpe}
+ else
+     targetname=${target}
+ fi
+
 if [ -z ${tag} ]; then
-    expdir=exp/${train_set}_${target}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}
+    expdir=exp/${train_set}_${targetname}_${etype}_e${elayers}_subsample${subsample}_unit${eunits}_proj${eprojs}_d${dlayers}_unit${dunits}_${atype}_aconvc${aconv_chans}_aconvf${aconv_filts}_mtlalpha${mtlalpha}_${opt}_bs${batchsize}_initchar
     if [ "${lsm_type}" != "" ]; then
         expdir=${expdir}_lsm${lsm_type}${lsm_weight}
     fi

@@ -24,9 +24,9 @@
 
 # to run:
 : <<'END'
-expath=exp/480h/train_word_blstmp_e6_subsample1_2_2_1_1_unit320_proj320_ctcchainer_d1_unit300_location_aconvc10_aconvf100_mtlalpha0_adadelta_bs40_mli800_mlo150_lsmunigram0.05_alldat
+expath=
 
-./decode.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target word --datadir data/480h --dumpdir /tmp/spalaska/howto_data_480h --dump_h False --recog_set dev_test
+./decode.sh --ctc_weight 0 --beam_size 20 --penalty 0.1 --expdir $expath --target char --datadir data --dumpdir /tmp/spalaska/swbd_data --dump_h False --recog_set eval2000
 END
  . ./path.sh
  . ./cmd.sh
@@ -61,9 +61,11 @@ END
  adaptation=0
  dump_h=False
 
+ nlsyms=data/lang_1char/non_lang_syms.txt
  #recog_set="dev_test held_out_test"
  #recog_set="dev_test"
- recog_set=held_out_test
+ #recog_set="held_out_test"
+ recog_set=eval2000
 
  . utils/parse_options.sh || exit 1;
  . ./path.sh
@@ -130,11 +132,9 @@ if [ ${stage} -le 5 ]; then
          wait
 
          if [ "${target}" == "bpe" ]; then
-             #score_sclite.sh --bpe true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
-             score_sclite.sh --bpe true ${expdir}/${decode_dir} ${dict}
+             score_sclite.sh --bpe true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
          else
-             #score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
-             score_sclite.sh --wer true ${expdir}/${decode_dir} ${dict}
+             score_sclite.sh --wer true --nlsyms ${nlsyms} ${expdir}/${decode_dir} ${dict}
          fi
 
      ) &

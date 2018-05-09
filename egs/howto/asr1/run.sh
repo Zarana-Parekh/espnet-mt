@@ -276,6 +276,11 @@ if [ ${stage} -le 2 ]; then
         --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
         --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
          ${datadir}/${train_dev} ${dict} > ${feat_dt_dir}/data_${target}.json
+    data2json.sh --feat ${feat_te_dir}/feats.scp \
+        --word_model ${word_model} --bpe_model ${bpe_model} --bpecode ${code} --vis_feat ${vis_feat} \
+        --obj_feat_path ${obj_feat_path} --plc_feat_path ${plc_feat_path} \
+         ${datadir}/${train_test} ${dict} > ${feat_te_dir}/data_${target}.json
+    exit 1;
 fi
 
 # It takes a few days. If you just want to end-to-end ASR without LM,
@@ -398,7 +403,7 @@ if [ ${stage} -le 4 ]; then
         --opt ${opt} \
         --dropout-rate 0.3 \
         --epochs ${epochs} \
- 	--adaptation ${adaptation}
+     	--adaptation ${adaptation}
 fi
 
 if [ ${stage} -le 5 ]; then
@@ -410,7 +415,7 @@ if [ ${stage} -le 5 ]; then
         # modified for incorporating adaptation
         #decode_dir=decode_final_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
         decode_dir=decode_final_beam${beam_size}_e${recog_model}_p${penalty}_len${minlenratio}-${maxlenratio}_ctcw${ctc_weight}
-        
+
         # split data
         #data=${datadir}/${rtask}
         #split_data.sh --per-utt ${data} ${nj};
@@ -443,7 +448,7 @@ if [ ${stage} -le 5 ]; then
             --maxlenratio ${maxlenratio} \
             --minlenratio ${minlenratio} \
             --adaptation ${adaptation} \
-            --ctc-weight ${ctc_weight} 
+            --ctc-weight ${ctc_weight}
         wait
 
         if [ "${target}" == "bpe" ]; then
